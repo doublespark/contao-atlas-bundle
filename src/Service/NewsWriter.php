@@ -35,11 +35,23 @@ class NewsWriter
     ];
 
     /** tl_news columns that hold a yes/no flag or an optional timestamp: written by the column's real type (see typed()). */
-    private const FLAGS = ['published'];
+    private const FLAGS = ['published', 'featured'];
     private const OPTIONAL_TIMES = ['start', 'stop'];
 
     /** tl_news columns the bundle writes itself or Contao owns: a category_column may not name one of these. */
-    private const PROTECTED_COLUMNS = ['id', 'pid', 'tstamp', 'sorting', 'date', 'time', 'alias', 'source', 'published', 'start', 'stop', 'headline', 'teaser', 'author', 'pagetitle', 'description'];
+    private const PROTECTED_COLUMNS = ['id', 'pid', 'tstamp', 'sorting', 'date', 'time', 'alias', 'source', 'published', 'start', 'stop', 'headline', 'teaser', 'author', 'pagetitle', 'description', 'featured', 'linktext', 'link_text', 'og_title', 'ogtitle', 'og_description', 'ogdescription'];
+
+    /**
+     * v0.3 optional fields => the tl_news column names they may live in (matched case-insensitively, first one the table has wins).
+     * Core Contao has `featured` only; the others depend on what the site added. A field with no matching column is reported in
+     * fields_unsupported, never dropped silently.
+     */
+    private const EXTRA_FIELDS = [
+        'featured' => ['featured'],
+        'link_text' => ['linktext', 'link_text'],
+        'og_title' => ['og_title', 'ogtitle'],
+        'og_description' => ['og_description', 'ogdescription'],
+    ];
 
     /** @var array<string,\Doctrine\DBAL\Schema\Column>|null lower-cased column name => column, for tl_news */
     private ?array $newsColumns = null;
@@ -60,12 +72,12 @@ class NewsWriter
     ) {
     }
 
-    /** @return array{id:int,url:?string}|null */
+    /** The existing entry for a reference, in the same answer shape as a write (nothing was written, so no field is applied). */
     public function findByRef(string $ref): ?array
     {
         $id = $this->db->fetchOne('SELECT news_id FROM tl_atlas_news_ref WHERE atlas_ref = ?', [$ref]);
 
-        return false === $id ? null : $this->result((int) $id);
+        return false === $id ? null : $this->answer((int) $id, null, []);
     }
 
     public function created(int $id): bool
@@ -89,7 +101,8 @@ class NewsWriter
         }
         $this->categories(); // probed before the transaction opens
 
-        $this->db->transactional(function () use ($in, &$id): void {
+        $count = 0;
+        $this->db->transactional(function () use ($in, &$id, &$count): void {
             $now = time();
             $when = $this->whenFrom($in['publish_at'] ?? null) ?? $now;
             $published = (bool) ($in['published'] ?? false);
@@ -107,8 +120,12 @@ class NewsWriter
             $id = (int) $this->db->lastInsertId();
 
             $contentId = 0;
-            if (isset($in['body_html'])) {
+            if (isset($in['elements'])) {
+                $contentId = $this->insertElements($id, $in['elements'], $now);
+                $count = \count($in['elements']);
+            } elseif (isset($in['body_html'])) {
                 $contentId = $this->insertBody($id, (string) $in['body_html'], $now);
+                $count = 1;
             }
 
             $this->db->insert('tl_atlas_news_ref', ['tstamp' => $now, 'atlas_ref' => $in['atlas_ref'], 'news_id' => $id, 'content_id' => $contentId]);
@@ -118,7 +135,7 @@ class NewsWriter
             }
         });
 
-        return $this->result($id);
+        return $this->answer($id, $count, $in);
     }
 
     /** @param array<string,mixed> $in validated input, every field optional */
@@ -126,7 +143,8 @@ class NewsWriter
     {
         $this->categories(); // probed before the transaction opens
 
-        $this->db->transactional(function () use ($id, $in): void {
+        $count = null;
+        $this->db->transactional(function () use ($id, $in, &$count): void {
             $now = time();
             $current = $this->db->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [$id]);
             $set = $this->plain($in) + ['tstamp' => $now];
@@ -153,7 +171,15 @@ class NewsWriter
 
             $this->db->update('tl_news', $this->existingColumns($set), ['id' => $id]);
 
-            if (isset($in['body_html'])) {
+            if (isset($in['elements'])) {
+                // Replace the entry's content elements with the list sent. Delete and insert share this one transaction, so a failure
+                // part way rolls back to the old body.
+                $this->db->delete('tl_content', ['ptable' => 'tl_news', 'pid' => $id]);
+                $first = $this->insertElements($id, $in['elements'], $now);
+                $this->db->update('tl_atlas_news_ref', ['content_id' => $first], ['news_id' => $id]);
+                $count = \count($in['elements']);
+            } elseif (isset($in['body_html'])) {
+                $count = 1;
                 $contentId = (int) $this->db->fetchOne('SELECT content_id FROM tl_atlas_news_ref WHERE news_id = ?', [$id]);
                 if ($contentId > 0 && false !== $this->db->fetchOne('SELECT id FROM tl_content WHERE id = ?', [$contentId])) {
                     $this->db->update('tl_content', ['text' => $in['body_html'], 'tstamp' => $now], ['id' => $contentId]);
@@ -168,7 +194,68 @@ class NewsWriter
             }
         });
 
-        return $this->result($id);
+        return $this->answer($id, $count, $in);
+    }
+
+    /**
+     * The v0.3 answer: result() plus elements_count (what was written; for an update that sent no body, what the entry holds) and
+     * fields_applied / fields_unsupported for the optional fields in the request.
+     *
+     * @param array<string,mixed> $in
+     * @return array<string,mixed>
+     */
+    private function answer(int $id, ?int $written, array $in): array
+    {
+        $count = $written ?? (int) $this->db->fetchOne("SELECT COUNT(*) FROM tl_content WHERE ptable = 'tl_news' AND pid = ?", [$id]);
+        [$applied, $unsupported] = $this->fieldSupport($in);
+        $out = $this->result($id);
+        $out += ['category_ids' => []];
+
+        return $out + ['elements_count' => $count, 'fields_applied' => $applied, 'fields_unsupported' => $unsupported];
+    }
+
+    /**
+     * Which of the v0.3 optional fields in this request the site can store. category_ids is applied when the categories mechanism
+     * (or column mode with a usable column) is there; unprocessable() has already refused a non-empty list otherwise.
+     *
+     * @param array<string,mixed> $in
+     * @return array{0:list<string>,1:list<string>}
+     */
+    public function fieldSupport(array $in): array
+    {
+        $applied = [];
+        $unsupported = [];
+        foreach (array_keys(self::EXTRA_FIELDS) as $field) {
+            if (array_key_exists($field, $in)) {
+                if (null !== $this->extraColumn($field)) {
+                    $applied[] = $field;
+                } else {
+                    $unsupported[] = $field;
+                }
+            }
+        }
+        if (array_key_exists('category_ids', $in)) {
+            $usable = $this->columnMode() ? null !== $this->categoryColumn() : null !== $this->categories();
+            if ($usable) {
+                $applied[] = 'category_ids';
+            } else {
+                $unsupported[] = 'category_ids';
+            }
+        }
+
+        return [$applied, $unsupported];
+    }
+
+    /** The tl_news column that holds a v0.3 optional field on this site, or null. Read from the schema, not assumed. */
+    private function extraColumn(string $field): ?\Doctrine\DBAL\Schema\Column
+    {
+        foreach (self::EXTRA_FIELDS[$field] as $name) {
+            if (isset($this->newsColumns()[$name])) {
+                return $this->newsColumns()[$name];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -385,10 +472,44 @@ class NewsWriter
         return (int) $this->db->lastInsertId();
     }
 
+    /**
+     * One tl_content text element per entry, in order (sorting ascending), and the id of the first. headline is Contao's serialised
+     * headline (h2 unit; empty = none); cssID carries section_id as the id part (empty when there is none).
+     *
+     * @param list<array{key?:string,section_id:string,headline:string,html:string}> $elements already validated
+     */
+    private function insertElements(int $newsId, array $elements, int $now): int
+    {
+        $first = 0;
+        foreach (array_values($elements) as $i => $element) {
+            $headline = (string) ($element['headline'] ?? '');
+            $this->db->insert('tl_content', [
+                'pid' => $newsId,
+                'ptable' => 'tl_news',
+                'sorting' => 128 * ($i + 1),
+                'tstamp' => $now,
+                'type' => 'text',
+                'headline' => '' === $headline ? '' : serialize(['unit' => 'h2', 'value' => $headline]),
+                'text' => (string) $element['html'],
+                'cssID' => serialize([(string) ($element['section_id'] ?? ''), '']),
+            ]);
+            if (0 === $i) {
+                $first = (int) $this->db->lastInsertId();
+            }
+        }
+
+        return $first;
+    }
+
     /** @return array<string,mixed> */
     private function plain(array $in): array
     {
         $out = [];
+        foreach (array_keys(self::EXTRA_FIELDS) as $field) {
+            if (array_key_exists($field, $in) && null !== $column = $this->extraColumn($field)) {
+                $out[$column->getName()] = 'featured' === $field ? (bool) $in[$field] : (string) $in[$field];
+            }
+        }
         foreach (self::COLUMNS as $field => $column) {
             if (array_key_exists($field, $in)) {
                 $out[$column] = 'author' === $column ? (int) $in[$field] : (string) $in[$field];
@@ -477,7 +598,7 @@ class NewsWriter
             if (null === $column) {
                 continue;
             }
-            if (\in_array($name, self::FLAGS, true)) {
+            if (\in_array(strtolower($name), self::FLAGS, true)) {
                 $value = self::typed($column, (bool) $value, true);
             } elseif (\in_array($name, self::OPTIONAL_TIMES, true)) {
                 $empty = '' === (string) $value || '0' === (string) $value;

@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class NewsController
 {
-    private const FIELDS = ['archive_id', 'headline', 'teaser', 'body_html', 'alias', 'meta_title', 'meta_description', 'author_id', 'publish_at', 'published', 'atlas_ref', 'category_ids'];
+    private const FIELDS = ['archive_id', 'headline', 'teaser', 'body_html', 'alias', 'meta_title', 'meta_description', 'author_id', 'publish_at', 'published', 'atlas_ref', 'category_ids', 'elements', 'featured', 'link_text', 'og_title', 'og_description'];
 
     public function __construct(private readonly NewsWriter $writer, private readonly string $tokenHash)
     {
@@ -41,6 +41,9 @@ class NewsController
             return $this->error('Body must be a JSON object.', 400);
         }
 
+        if (null !== $invalid = $this->contentProblem($in)) {
+            return $this->error($invalid, 422); // refused before anything is written, the duplicate guard included
+        }
         $problem = $this->problem($in, true);
         if (null !== $problem) {
             return $this->error($problem, 400);
@@ -83,6 +86,9 @@ class NewsController
         }
 
         unset($in['atlas_ref']); // the reference is fixed when the entry is created
+        if (null !== $invalid = $this->contentProblem($in)) {
+            return $this->error($invalid, 422);
+        }
         $problem = $this->problem($in, false);
         if (null !== $problem) {
             return $this->error($problem, 400);
@@ -116,6 +122,54 @@ class NewsController
         $data = json_decode($request->getContent(), true);
 
         return \is_array($data) && !array_is_list($data) ? array_intersect_key($data, array_flip(self::FIELDS)) : (\is_array($data) && [] === $data ? [] : null);
+    }
+
+    /**
+     * v0.3 checks, 422 with {"error"}: body_html and the content list together, a malformed list, a bad section_id, a wrong type for
+     * featured / link_text / og_title / og_description. Run before any write.
+     *
+     * The wording avoids the word "elements" on purpose: Atlas's adapter reads any 4xx whose text contains it as "this bundle cannot
+     * take an element list" (web/lib/contaoPublish.ts refusesElements) and would hide the real reason.
+     */
+    private function contentProblem(array $in): ?string
+    {
+        if (array_key_exists('elements', $in)) {
+            if (array_key_exists('body_html', $in)) {
+                return 'Send body_html or a list of content blocks, not both.';
+            }
+            $list = $in['elements'];
+            if (!\is_array($list) || !array_is_list($list) || [] === $list || \count($list) > 100) {
+                return 'The content list must be a non-empty list of 100 entries at most.';
+            }
+            foreach ($list as $i => $entry) {
+                $n = $i + 1;
+                if (!\is_array($entry) || array_is_list($entry)) {
+                    return "Content list entry $n must be an object with key, section_id, headline and html.";
+                }
+                if (!isset($entry['html']) || !\is_string($entry['html']) || '' === trim($entry['html'])) {
+                    return "Content list entry $n has no html.";
+                }
+                foreach (['key', 'section_id', 'headline'] as $text) {
+                    if (isset($entry[$text]) && !\is_string($entry[$text])) {
+                        return "Content list entry $n: $text must be a string.";
+                    }
+                }
+                $sectionId = $entry['section_id'] ?? '';
+                if ('' !== $sectionId && (\strlen($sectionId) > 100 || 1 !== preg_match('/^[A-Za-z][A-Za-z0-9_-]*$/', $sectionId))) {
+                    return "Content list entry $n: section_id must be a valid CSS id (letters, digits, hyphens and underscores, starting with a letter, 100 characters at most).";
+                }
+            }
+        }
+        if (array_key_exists('featured', $in) && !\is_bool($in['featured'])) {
+            return 'featured must be true or false.';
+        }
+        foreach (['link_text', 'og_title', 'og_description'] as $text) {
+            if (array_key_exists($text, $in) && !\is_string($in[$text])) {
+                return "$text must be a string.";
+            }
+        }
+
+        return null;
     }
 
     private function problem(array $in, bool $creating): ?string
