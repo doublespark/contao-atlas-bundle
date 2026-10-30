@@ -1,0 +1,15 @@
+atlas_api_news_create:
+    path: /atlas-api/news
+    controller: Doublespark\ContaoAtlasBundle\Controller\NewsController::create
+    methods: [POST]
+    defaults:
+        _token_check: false
+
+atlas_api_news_update:
+    path: /atlas-api/news/{id}
+    controller: Doublespark\ContaoAtlasBundle\Controller\NewsController::update
+    methods: [PUT]
+    requirements:
+        id: '\d+'
+    defaults:
+        _token_check: false

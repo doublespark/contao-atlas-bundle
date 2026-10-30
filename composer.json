@@ -1,0 +1,30 @@
+{
+    "name": "doublespark/contao-atlas-bundle",
+    "description": "Lets Doublespark Atlas create and update news entries over a small bearer-token API.",
+    "type": "contao-bundle",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.1",
+        "contao/core-bundle": "^4.13 || ^5.0",
+        "doctrine/dbal": "^3.3 || ^4.0",
+        "symfony/config": "^5.4 || ^6.0 || ^7.0",
+        "symfony/console": "^5.4 || ^6.0 || ^7.0",
+        "symfony/dependency-injection": "^5.4 || ^6.0 || ^7.0",
+        "symfony/filesystem": "^5.4 || ^6.0 || ^7.0",
+        "symfony/http-foundation": "^5.4 || ^6.0 || ^7.0",
+        "symfony/http-kernel": "^5.4 || ^6.0 || ^7.0",
+        "symfony/routing": "^5.4 || ^6.0 || ^7.0",
+        "symfony/yaml": "^5.4 || ^6.0 || ^7.0"
+    },
+    "suggest": {
+        "contao/manager-plugin": "Loads the bundle's Plugin class on a Contao Manager (managed edition) site; a site without it registers the bundle by hand"
+    },
+    "autoload": {
+        "psr-4": {
+            "Doublespark\\ContaoAtlasBundle\\": "src/"
+        }
+    },
+    "extra": {
+        "contao-manager-plugin": "Doublespark\\ContaoAtlasBundle\\ContaoManager\\Plugin"
+    }
+}

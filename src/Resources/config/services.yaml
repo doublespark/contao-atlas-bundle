@@ -1,0 +1,25 @@
+services:
+    _defaults:
+        autoconfigure: true
+
+    Doublespark\ContaoAtlasBundle\Service\NewsWriter:
+        arguments:
+            - '@database_connection'
+            - '@contao.framework'
+            - '@?contao.routing.content_url_generator'
+            - '%doublespark_contao_atlas.timezone%'
+            - '%doublespark_contao_atlas.default_author_id%'
+            - '%doublespark_contao_atlas.category_mode%'
+            - '%doublespark_contao_atlas.category_column%'
+
+    Doublespark\ContaoAtlasBundle\Controller\NewsController:
+        public: true
+        arguments:
+            - '@Doublespark\ContaoAtlasBundle\Service\NewsWriter'
+            - '%doublespark_contao_atlas.token_hash%'
+        tags: ['controller.service_arguments']
+
+    Doublespark\ContaoAtlasBundle\Command\MintTokenCommand:
+        arguments:
+            - '%kernel.project_dir%'
+        tags: ['console.command']
