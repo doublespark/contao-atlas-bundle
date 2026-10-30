@@ -14,7 +14,7 @@ Installed like every other Doublespark bundle: through the site's own Git reposi
        { "type": "vcs", "url": "https://github.com/doublespark/contao-atlas-bundle" }
    ],
    "require": {
-       "doublespark/contao-atlas-bundle": "^0.2"
+       "doublespark/contao-atlas-bundle": "dev-main"
    }
    ```
 
@@ -25,8 +25,9 @@ Installed like every other Doublespark bundle: through the site's own Git reposi
    to create `tl_atlas_news_ref`.
 5. Atlas writes `config/atlas_api.yaml` (the token hash) and runs its smoke test.
 
-Releases are tagged here (`v0.2.0`, ...). To ship a change: commit here, tag a new version, then update the lock file in each site repo
-and deploy as above.
+Like the other in-house Doublespark bundles, sites require `dev-main` and `composer.lock` pins the exact commit, so `composer install`
+on a server always installs exactly what was committed. To ship a change: commit here, then in each site repo run
+`composer update doublespark/contao-atlas-bundle` locally, commit the lock file and deploy as above.
 
 ## What it adds
 
