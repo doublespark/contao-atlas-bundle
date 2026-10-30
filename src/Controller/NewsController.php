@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * POST /atlas-api/news and PUT /atlas-api/news/{id}. Bearer token on both; 401 without it, 404 for an id this API did not create.
+ * POST /atlas-api/news creates; POST or PUT /atlas-api/news/{id} updates (POST because some servers refuse PUT). Bearer token on both; 401 without it, 404 for an id this API did not create.
  * 422 when the request is well formed but the site cannot do what it asks: category_ids on a site with no news categories mechanism,
  * a category id the site does not have, or an author_id that is not a back-end user. Categories are never silently dropped, or (category_mode column) a category_ids that is not exactly one whole number. Categories are never silently dropped.
  */

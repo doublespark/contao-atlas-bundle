@@ -8,7 +8,8 @@ atlas_api_news_create:
 atlas_api_news_update:
     path: /atlas-api/news/{id}
     controller: Doublespark\ContaoAtlasBundle\Controller\NewsController::update
-    methods: [PUT]
+    # POST as well as PUT: some Doublespark servers' nginx refuses PUT outright (Urban Square, 405, 30 Oct 2026), and Atlas sends POST
+    methods: [PUT, POST]
     requirements:
         id: '\d+'
     defaults:

@@ -36,8 +36,9 @@ on a server always installs exactly what was committed. To ship a change: commit
   `atlas_ref` (required string), `category_ids` (optional list of whole numbers, v0.2). Returns `{id, url, author_id}` with 201, plus
   `category_ids` (read back from the database) on a site that has the categories mechanism. If an entry with that `atlas_ref` already exists it returns the
   existing `{id, url}` with 200 and creates nothing.
-- `PUT /atlas-api/news/{id}` updates an entry this API created. Same fields, all optional; `published` sets or clears publication.
-  `atlas_ref` is fixed at creation.
+- `POST /atlas-api/news/{id}` (or `PUT`, same route) updates an entry this API created. Same fields, all optional; `published` sets or
+  clears publication. `atlas_ref` is fixed at creation. POST is accepted because some servers' nginx refuses PUT with a 405 (Urban
+  Square, 30 October 2026); Atlas sends POST.
 - `category_ids` (v0.2) replaces the entry's categories on PUT (`[]` clears them; leaving it out changes nothing). It needs the news categories
   extension's data model on the site: a `tl_news_category` table and a relation table with `news_id` and `category_id` columns (normally
   `tl_news_categories`), found by looking at the schema, not assumed. If `tl_news` has a `categories` column that can hold text, the serialised id list is
