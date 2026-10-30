@@ -14,3 +14,13 @@ atlas_api_news_update:
         id: '\d+'
     defaults:
         _token_check: false
+
+atlas_api_news_delete:
+    path: /atlas-api/news/{id}/delete
+    controller: Doublespark\ContaoAtlasBundle\Controller\NewsController::delete
+    # POST, not DELETE: the same servers that refuse PUT are not trusted with DELETE either
+    methods: [POST]
+    requirements:
+        id: '\d+'
+    defaults:
+        _token_check: false

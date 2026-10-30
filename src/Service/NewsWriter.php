@@ -35,7 +35,15 @@ class NewsWriter
     ];
 
     /** tl_news columns that hold a yes/no flag or an optional timestamp: written by the column's real type (see typed()). */
-    private const FLAGS = ['published'];
+    private const FLAGS = ['published', 'featured', 'hofff_st'];
+
+    /**
+     * v0.3 optional fields => the tl_news column each is written to, only where this site's tl_news HAS that column (found by name):
+     * featured is core on 4.13 and 5.x; linkText is core on 5.x only (checked in Contao's source at 4.13.56 and 5.7, 30 Oct 2026); the two
+     * Open Graph fields are the hofff/contao-social-tags extension's columns, which only take effect with its hofff_st switch on and an
+     * og type set (see optionalColumns()). A field whose column is missing is reported back as unsupported, never silently dropped.
+     */
+    public const OPTIONAL_FIELDS = ['featured' => 'featured', 'link_text' => 'linkText', 'og_title' => 'hofff_st_og_title', 'og_description' => 'hofff_st_og_description'];
     private const OPTIONAL_TIMES = ['start', 'stop'];
 
     /** tl_news columns the bundle writes itself or Contao owns: a category_column may not name one of these. */
@@ -94,7 +102,7 @@ class NewsWriter
             $when = $this->whenFrom($in['publish_at'] ?? null) ?? $now;
             $published = (bool) ($in['published'] ?? false);
 
-            $row = $this->plain($in) + [
+            $row = $this->plain($in) + $this->optionalColumns($in, null) + [
                 'pid' => (int) $in['archive_id'],
                 'tstamp' => $now,
                 'date' => $when,
@@ -113,6 +121,10 @@ class NewsWriter
 
             $this->db->insert('tl_atlas_news_ref', ['tstamp' => $now, 'atlas_ref' => $in['atlas_ref'], 'news_id' => $id, 'content_id' => $contentId]);
 
+            if (isset($in['elements'])) {
+                $this->replaceElements($id, $in['elements'], $now);
+            }
+
             if ([] !== ($in['category_ids'] ?? [])) {
                 $this->setCategories($id, $in['category_ids']);
             }
@@ -129,7 +141,7 @@ class NewsWriter
         $this->db->transactional(function () use ($id, $in): void {
             $now = time();
             $current = $this->db->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [$id]);
-            $set = $this->plain($in) + ['tstamp' => $now];
+            $set = $this->plain($in) + $this->optionalColumns($in, $current) + ['tstamp' => $now];
 
             if (isset($in['archive_id'])) {
                 $set['pid'] = (int) $in['archive_id'];
@@ -153,7 +165,12 @@ class NewsWriter
 
             $this->db->update('tl_news', $this->existingColumns($set), ['id' => $id]);
 
-            if (isset($in['body_html'])) {
+            if (isset($in['elements'])) {
+                $this->replaceElements($id, $in['elements'], $now);
+            } elseif (isset($in['body_html']) && \count($this->trackedElements($id)) > 1) {
+                // The entry was sent as an element list and now arrives as one body: the list is replaced by that one element.
+                $this->replaceElements($id, [['section_id' => '', 'headline' => '', 'html' => (string) $in['body_html']]], $now);
+            } elseif (isset($in['body_html'])) {
                 $contentId = (int) $this->db->fetchOne('SELECT content_id FROM tl_atlas_news_ref WHERE news_id = ?', [$id]);
                 if ($contentId > 0 && false !== $this->db->fetchOne('SELECT id FROM tl_content WHERE id = ?', [$contentId])) {
                     $this->db->update('tl_content', ['text' => $in['body_html'], 'tstamp' => $now], ['id' => $contentId]);
@@ -169,6 +186,63 @@ class NewsWriter
         });
 
         return $this->result($id);
+    }
+
+    /**
+     * Deletes an entry this API created, with everything that belongs to it: its content elements (all of them, as the back end's own
+     * delete does), its category links, and its tl_atlas_news_ref row. Only reachable for an id in tl_atlas_news_ref whose atlas_ref the
+     * caller has repeated (see NewsController::delete), so an entry a person made can never be deleted through the API.
+     */
+    public function delete(int $id): void
+    {
+        $mechanism = $this->categories(); // probed before the transaction opens
+
+        $this->db->transactional(function () use ($id, $mechanism): void {
+            $this->db->executeStatement("DELETE FROM tl_content WHERE ptable = 'tl_news' AND pid = ?", [$id]);
+            if (null !== $mechanism) {
+                $this->db->executeStatement('DELETE FROM '.$this->db->quoteIdentifier($mechanism['relation']).' WHERE news_id = ?', [$id]);
+            }
+            $this->db->executeStatement('DELETE FROM tl_news WHERE id = ?', [$id]);
+            $this->db->executeStatement('DELETE FROM tl_atlas_news_ref WHERE news_id = ?', [$id]);
+        });
+    }
+
+    public function refFor(int $id): ?string
+    {
+        $ref = $this->db->fetchOne('SELECT atlas_ref FROM tl_atlas_news_ref WHERE news_id = ?', [$id]);
+
+        return false === $ref ? null : (string) $ref;
+    }
+
+    /**
+     * Which of the optional fields sent this site can store: [applied, unsupported], in the order sent. category_ids counts as applied
+     * whenever it was sent, because unprocessable() has already refused it with a 422 on a site that cannot store it.
+     *
+     * @return array{0:list<string>,1:list<string>}
+     */
+    public function optionalReport(array $in): array
+    {
+        $applied = $unsupported = [];
+        foreach (array_keys(self::OPTIONAL_FIELDS) as $field) {
+            if (array_key_exists($field, $in)) {
+                if (null !== ($this->newsColumns()[strtolower(self::OPTIONAL_FIELDS[$field])] ?? null)) {
+                    $applied[] = $field;
+                } else {
+                    $unsupported[] = $field;
+                }
+            }
+        }
+        if (array_key_exists('category_ids', $in)) {
+            $applied[] = 'category_ids';
+        }
+
+        return [$applied, $unsupported];
+    }
+
+    /** How many content elements this API holds for the entry: what an element list was stored as. */
+    public function elementCount(int $id): int
+    {
+        return \count($this->trackedElements($id));
     }
 
     /**
@@ -383,6 +457,98 @@ class NewsWriter
         ]);
 
         return (int) $this->db->lastInsertId();
+    }
+
+    /**
+     * The tl_content ids this API created for an entry and that still exist under it: content_id (one body, v0.1 and v0.2) and content_ids
+     * (an element list, v0.3), in their stored order. Only ids still parented to this entry count, so a person's own elements are never touched.
+     *
+     * @return list<int>
+     */
+    private function trackedElements(int $newsId): array
+    {
+        $ref = $this->db->fetchAssociative('SELECT * FROM tl_atlas_news_ref WHERE news_id = ?', [$newsId]);
+        if (false === $ref) {
+            return [];
+        }
+        $ids = '' !== (string) ($ref['content_ids'] ?? '') ? array_map('intval', explode(',', (string) $ref['content_ids'])) : [(int) $ref['content_id']];
+        $ids = array_values(array_filter($ids, static fn (int $i): bool => $i > 0));
+        if ([] === $ids) {
+            return [];
+        }
+        $marks = implode(',', array_fill(0, \count($ids), '?'));
+        $alive = array_map('intval', $this->db->fetchFirstColumn("SELECT id FROM tl_content WHERE ptable = 'tl_news' AND pid = ? AND id IN ($marks)", [$newsId, ...$ids]));
+
+        return array_values(array_filter($ids, static fn (int $i): bool => \in_array($i, $alive, true)));
+    }
+
+    /**
+     * Replaces the elements this API created for an entry with the list given: one tl_content text element per block, in order, with its CSS id
+     * and headline (an h2). Elements a person added to the entry in the back end are left alone. Needs the content_ids column that
+     * contao:migrate adds with v0.3; without it nothing is written and the request fails with that reason.
+     *
+     * @param list<array{section_id:string,headline:string,html:string}> $elements
+     */
+    private function replaceElements(int $newsId, array $elements, int $now): void
+    {
+        $refColumns = array_map(static fn ($c): string => strtolower($c->getName()), array_values($this->db->createSchemaManager()->listTableColumns('tl_atlas_news_ref')));
+        if (!\in_array('content_ids', $refColumns, true)) {
+            throw new \RuntimeException('tl_atlas_news_ref has no content_ids column yet: run contao:migrate after installing bundle v0.3.');
+        }
+
+        $old = $this->trackedElements($newsId);
+        if ([] !== $old) {
+            $marks = implode(',', array_fill(0, \count($old), '?'));
+            $this->db->executeStatement("DELETE FROM tl_content WHERE ptable = 'tl_news' AND pid = ? AND id IN ($marks)", [$newsId, ...$old]);
+        }
+
+        $contentColumns = [];
+        foreach (array_values($this->db->createSchemaManager()->listTableColumns('tl_content')) as $column) {
+            $contentColumns[strtolower($column->getName())] = $column->getName();
+        }
+
+        $ids = [];
+        foreach (array_values($elements) as $n => $element) {
+            $row = ['pid' => $newsId, 'ptable' => 'tl_news', 'sorting' => 128 * ($n + 1), 'tstamp' => $now, 'type' => 'text', 'text' => $element['html']];
+            if ('' !== $element['headline']) {
+                $row['headline'] = serialize(['value' => $element['headline'], 'unit' => 'h2']);
+            }
+            if ('' !== $element['section_id']) {
+                $row['cssID'] = serialize([$element['section_id'], '']);
+            }
+            $row = array_filter($row, static fn (string $k): bool => isset($contentColumns[strtolower($k)]), ARRAY_FILTER_USE_KEY);
+            $this->db->insert('tl_content', $row);
+            $ids[] = (int) $this->db->lastInsertId();
+        }
+
+        $this->db->update('tl_atlas_news_ref', ['content_id' => $ids[0] ?? 0, 'content_ids' => implode(',', $ids)], ['news_id' => $newsId]);
+    }
+
+    /**
+     * The optional v0.3 fields as tl_news columns, for the ones this site has (optionalReport() says which). The Open Graph values switch on
+     * the social tags extension for the entry (hofff_st) and give it the og type 'article' when it has none, because the extension ignores
+     * its title and description otherwise and its type is a required field in the back end.
+     *
+     * @param array<string,mixed>|null $current the entry's row when updating, null when creating
+     * @return array<string,mixed>
+     */
+    private function optionalColumns(array $in, ?array $current): array
+    {
+        $columns = $this->newsColumns();
+        $out = [];
+        foreach (self::OPTIONAL_FIELDS as $field => $column) {
+            if (array_key_exists($field, $in) && null !== ($columns[strtolower($column)] ?? null)) {
+                $out[$column] = 'featured' === $field ? (bool) $in[$field] : (string) $in[$field];
+            }
+        }
+        if ((isset($out['hofff_st_og_title']) || isset($out['hofff_st_og_description'])) && null !== ($columns['hofff_st'] ?? null)) {
+            $out['hofff_st'] = true;
+            if (null !== ($columns['hofff_st_og_type'] ?? null) && '' === (string) ($current['hofff_st_og_type'] ?? '')) {
+                $out['hofff_st_og_type'] = 'article';
+            }
+        }
+
+        return $out;
     }
 
     /** @return array<string,mixed> */

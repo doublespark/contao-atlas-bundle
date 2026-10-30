@@ -62,13 +62,30 @@ on a server always installs exactly what was committed. To ship a change: commit
   and prints the token once to stdout (everything else goes to stderr). Clear the cache afterwards.
 - A table, `tl_atlas_news_ref`, records the entries the API created. Run `contao:migrate` after installing to create it.
 
+### v0.3 (30 October 2026)
+
+- `elements`, instead of `body_html` (sending both is a 400): a list of 1 to 50 blocks, each `{section_id, headline, html}`. Each becomes one `tl_content`
+  text element, in order, with `section_id` as its CSS id (empty means none, otherwise a CSS id) and `headline` as an h2 element headline (empty means none).
+  A re-send replaces the elements this API made and leaves any a person added in the back end alone. The answer carries `elements_count`, read back.
+  The element ids are kept in `tl_atlas_news_ref.content_ids`, which `contao:migrate` adds; until it has run, a list is refused with a 500 naming it.
+- Optional fields, each written only where the site's `tl_news` has the column, and reported as `fields_applied` / `fields_unsupported` in the answer
+  (`category_ids` counts as applied whenever it is accepted):
+  `featured` (bool, core `featured`), `link_text` (core `linkText`, Contao 5 only), `og_title` and `og_description` (`hofff_st_og_title` /
+  `hofff_st_og_description` from hofff/contao-social-tags, which also switches the extension on for the entry and sets its type to `article` when it has none).
+  Column names checked in the sources of Contao 4.13.56 and 5.7 and of hofff/contao-social-tags 2.0.4 on 30 October 2026.
+- `POST /atlas-api/news/{id}/delete` with `{"atlas_ref": "<the entry's ref>"}` deletes an entry this API created, with all its content elements and category
+  links. A missing or different `atlas_ref` is a 409 and nothing is deleted; an id this API did not create is a 404. POST, not DELETE, for the same servers that refuse PUT.
+- `php tests/api_sqlite.php` drives the real controller and writer against SQLite in the shape of a Contao 5.7 site and a 4.13 site (29 checks). It needs
+  doctrine/dbal 3, symfony/http-foundation and their small dependencies as plain checkouts under `tests/lib/` or the folder named by `BUNDLE_TEST_LIB`.
+  It proves the PHP logic only, not a site: MySQL types and Contao's own rendering are proved by the Atlas Connect job's smoke test on each site.
+
 ## Not covered
 
 Images and any read endpoint are not part of this version. Categories are read by the `contao-site-info` command (Atlas side), not by an endpoint here.
 
 ## Not verified
 
-Written without PHP available and not run against a Contao site. The `tl_news` columns `pageTitle` and `description`
+v0.1 and v0.2 were written without PHP available; both have since passed the Atlas smoke test live on four sites (30 October 2026). The `tl_news` columns `pageTitle` and `description`
 are written only if the site's table has them; entry URLs come from `contao.routing.content_url_generator` (Contao 5.3 and later) or
 `News::generateNewsUrl` (earlier), and are `null` if Contao cannot work one out. Test on a non-live site first.
 

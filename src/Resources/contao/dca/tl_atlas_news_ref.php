@@ -20,5 +20,7 @@ $GLOBALS['TL_DCA']['tl_atlas_news_ref'] = [
         'atlas_ref' => ['sql' => "varchar(190) NOT NULL default ''"],
         'news_id' => ['sql' => "int(10) unsigned NOT NULL default '0'"],
         'content_id' => ['sql' => "int(10) unsigned NOT NULL default '0'"],
+        // v0.3: every tl_content id of an element list, in order, comma-separated. content_id stays the first, for v0.2 readers.
+        'content_ids' => ['sql' => "varchar(1000) NOT NULL default ''"],
     ],
 ];
