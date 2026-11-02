@@ -89,6 +89,13 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.5.1 (2 November 2026) - fix: image list answered 500
+
+`GET /atlas-api/images` failed with `array_push(): Argument #1 ($array) must be of type array, null given` for any image that is used only in a
+gallery (a `multiSRC` list) and in no single-image column: its placement list had not been started, and `array_push` was handed null. The list is
+now started when the first gallery placement is added. Empty, NULL, truncated and non-array `multiSRC` values and meta values (`''`, NULL, `false`,
+a bare string) were checked and already read as "none"; `tests/images_sqlite.php` now covers each of them (the check count is higher than the 31 below). Still read-only.
+
 ### v0.5 (2 November 2026) - read-only image inventory
 
 Nothing in v0.5 writes: the two routes are GET only, run SELECT statements and read files, and never ask Contao's image factory for a variant

@@ -228,7 +228,9 @@ class ImageInventory
 
         foreach ($this->blobIndex() as $uuid => $list) {
             if (isset($wanted[$uuid])) {
-                array_push($found[$uuid], ...$list);
+                // An image that sits only in a gallery has no entry from the single-image columns yet, so start its list here
+                // (array_push on a missing key hands it null: the TypeError behind the 500 on /atlas-api/images).
+                $found[$uuid] = array_merge($found[$uuid] ?? [], $list);
             }
         }
 

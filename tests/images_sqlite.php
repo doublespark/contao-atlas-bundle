@@ -187,5 +187,44 @@ check('resolve without the token: 401', 401 === $st);
 check('nothing in the database or the project folder changed', $before === snapshot($db, $root));
 check('uuidsIn: text in a blob holds none', [] === ImageInventory::uuidsIn('a plain text value that is longer than sixteen bytes'));
 
+// --- v0.5.1: shapes that used to end in a 500 (array_push on a missing bucket) or could, added after the read-only check above ---
+// An image used only in a gallery (no single-image column holds it): the original array_push TypeError.
+$file(8, 8, 'files/gallery-only.jpg', 'jpg', []);
+$db->insert('tl_content', ['id' => 60, 'pid' => 20, 'ptable' => 'tl_article', 'type' => 'gallery', 'multiSRC' => serialize([$u(8)])]);
+// Blob values that hold no list: NULL, empty, text, a truncated serialisation, a serialised non-array, a serialised empty array.
+$db->insert('tl_content', ['id' => 61, 'pid' => 20, 'ptable' => 'tl_article', 'type' => 'gallery', 'multiSRC' => null, 'orderSRC' => null]);
+$db->insert('tl_content', ['id' => 62, 'pid' => 20, 'ptable' => 'tl_article', 'type' => 'gallery', 'multiSRC' => '']);
+$db->insert('tl_content', ['id' => 63, 'pid' => 20, 'ptable' => 'tl_article', 'type' => 'gallery', 'multiSRC' => 'a:2:{i:0;s:16:"trunc']);
+$db->insert('tl_content', ['id' => 64, 'pid' => 20, 'ptable' => 'tl_article', 'type' => 'gallery', 'multiSRC' => 's:3:"abc";']);
+$db->insert('tl_content', ['id' => 65, 'pid' => 20, 'ptable' => 'tl_article', 'type' => 'gallery', 'multiSRC' => 'a:0:{}']);
+// Meta that is not a language => fields array: empty, NULL, false, a bare string, and a language whose fields are not an array.
+$file(9, 9, 'files/meta-empty.jpg', 'jpg');
+$db->update('tl_files', ['meta' => ''], ['id' => 9]);
+$file(10, 10, 'files/meta-false.jpg', 'jpg');
+$db->update('tl_files', ['meta' => serialize(false)], ['id' => 10]);
+$file(11, 11, 'files/meta-string.jpg', 'jpg');
+$db->update('tl_files', ['meta' => serialize('abc')], ['id' => 11]);
+$file(12, 12, 'files/meta-odd.jpg', 'jpg');
+$db->update('tl_files', ['meta' => serialize(['en' => 'x', 'de' => ['alt' => null, 'title' => ['n'], 'caption' => 'ok']])], ['id' => 12]);
+$file(13, 13, 'files/meta-garbage.jpg', 'jpg');
+$db->update('tl_files', ['meta' => 'a:1:{broken'], ['id' => 13]);
+
+// the blob index is cached per instance, so read the new rows through a fresh one
+$c = new ImagesController(new ImageInventory($db, new ContentUrls(new Contao\CoreBundle\Framework\ContaoFramework(), null), $root), hash('sha256', 'tok'));
+[$st, $a] = get($c, 'list', ['per_page' => '100']);
+check('list after the odd rows: still 200, every image listed', 200 === $st && 11 === $a['total'] && 11 === count($a['images']), $a['error'] ?? $a['total'] ?? $a);
+$byPath = array_column($a['images'] ?? [], null, 'path');
+check('gallery-only image: one blob placement, no error', ['tl_content.multiSRC#60'] === $where($byPath['files/gallery-only.jpg'] ?? ['placements' => []]), $byPath['files/gallery-only.jpg'] ?? null);
+check('gallery-only image still has its column kind', 'blob' === ($byPath['files/gallery-only.jpg']['placements'][0]['column_kind'] ?? null));
+check('image in a gallery and a single column keeps both placements', 4 === count($byPath['files/hero.png']['placements'] ?? []), $byPath['files/hero.png']['placements'] ?? null);
+check('meta of empty, false, a bare string and unreadable text is an empty list', [] === $byPath['files/meta-empty.jpg']['meta'] && [] === $byPath['files/meta-false.jpg']['meta']
+    && [] === $byPath['files/meta-string.jpg']['meta'] && [] === $byPath['files/meta-garbage.jpg']['meta'], array_column($a['images'], 'meta', 'path'));
+check('meta NULL (the column default) is an empty list', [] === $byPath['files/logo.svg']['meta']);
+check('meta with a non-array language and non-scalar values keeps only the scalars', ['de' => ['caption' => 'ok']] === $byPath['files/meta-odd.jpg']['meta'], $byPath['files/meta-odd.jpg']['meta']);
+check('uuidsIn: empty, truncated, non-array and empty-array values hold none', [] === ImageInventory::uuidsIn('') && [] === ImageInventory::uuidsIn('a:2:{i:0;s:16:"trunc')
+    && [] === ImageInventory::uuidsIn('s:3:"abc";') && [] === ImageInventory::uuidsIn('a:0:{}'));
+[$st] = get($c, 'list', ['page' => '99']);
+check('a page past the end: 200 with no images', 200 === $st);
+
 echo $fails ? "FAILED: $fails\n" : "ALL PASSED\n";
 }
