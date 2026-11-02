@@ -41,3 +41,18 @@ atlas_api_pages_update:
         id: '\d+'
     defaults:
         _token_check: false
+
+# v0.5, read-only: the image inventory and the variant resolver. GET only; nothing under these routes writes.
+atlas_api_images_list:
+    path: /atlas-api/images
+    controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::list
+    methods: [GET]
+    defaults:
+        _token_check: false
+
+atlas_api_images_resolve:
+    path: /atlas-api/images/resolve
+    controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::resolve
+    methods: [GET]
+    defaults:
+        _token_check: false

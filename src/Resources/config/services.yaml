@@ -36,3 +36,21 @@ services:
             - '@Doublespark\ContaoAtlasBundle\Service\PageMetaWriter'
             - '%doublespark_contao_atlas.token_hash%'
         tags: ['controller.service_arguments']
+
+    Doublespark\ContaoAtlasBundle\Service\ContentUrls:
+        arguments:
+            - '@contao.framework'
+            - '@?contao.routing.content_url_generator'
+
+    Doublespark\ContaoAtlasBundle\Service\ImageInventory:
+        arguments:
+            - '@database_connection'
+            - '@Doublespark\ContaoAtlasBundle\Service\ContentUrls'
+            - '%kernel.project_dir%'
+
+    Doublespark\ContaoAtlasBundle\Controller\ImagesController:
+        public: true
+        arguments:
+            - '@Doublespark\ContaoAtlasBundle\Service\ImageInventory'
+            - '%doublespark_contao_atlas.token_hash%'
+        tags: ['controller.service_arguments']

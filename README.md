@@ -89,9 +89,41 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.5 (2 November 2026) - read-only image inventory
+
+Nothing in v0.5 writes: the two routes are GET only, run SELECT statements and read files, and never ask Contao's image factory for a variant
+(which would create one). Same bearer token as the other calls.
+
+- `GET /atlas-api/images?page=N&per_page=M` (per_page 1 to 500, default 100) lists every image file in `tl_files` (jpg, jpeg, png, webp, gif, svg,
+  avif, any case), oldest id first: `id`, `uuid` (lower-case hex), `path`, `hash`, `extension`, `width` and `height` (from the file header, or an SVG's
+  width/height or viewBox; null when the file is not on this server's disk), `meta` per language (alt, title, caption, link, license and whatever else
+  the serialised array holds), and `placements`. The answer also carries `total`, `pages` and `uuid_columns` (every column the scan covered).
+- A placement is any row whose UUID column references the file. The columns come from `information_schema`, never a fixed list: every `binary(16)`
+  column (one UUID, e.g. `singleSRC`, `hofff_st_og_image`, Doublespark's `dsImg_*Src` and `tl_ds_portfolio.main_image`) and every blob column (a
+  serialised list, e.g. `multiSRC`) of every `tl_` table, except `tl_files` itself, Contao's bookkeeping tables (versions, undo, log, search, crawl,
+  cron, message queue, sessions), user and member permissions, image sizes, and blob columns whose name starts with `order` (`orderSRC` repeats
+  `multiSRC` in sort order). Each placement has `table`, `column`, `row_id`, `element_type` (the row's `type`), `published` (`invisible` inverted
+  where the table has it, else `published`, else null), `overwrite_meta` (null when the table has no such column), the placement's own `alt`,
+  `title` (`imageTitle`) and `caption` only when `overwriteMeta` is set, and `parent`: `page_id`/`page_alias`, `article_id`, `news_id`/`news_alias`,
+  or `parent_table`/`parent_id` for anything else, plus `url` where Contao can work one out. Content elements are followed through nested elements
+  (Contao 5 element groups) to their article or news entry.
+- `GET /atlas-api/images/resolve?url[]=...&url[]=...` (1 to 20 addresses; a single `url=` also works) maps rendered addresses to source files. Each
+  answer has `uuid`, `path`, `candidates` and `method`: `file_path` (a `files/` address), `deferred_store` (a variant Contao has not generated yet:
+  `assets/images/deferred/<variant>.json` names its source exactly), `filename` (a generated variant), `ambiguous` (several image files share the
+  name; all are listed as candidates) or `unresolved`.
+- Why the file name, not the image factory: contao/image names a variant `<source file name>-<hash>.<format>` in a folder named after the hash's first
+  character (`Resizer::createCachePath`); the hash covers the resize settings and cannot be reversed, the factory only works forwards (source to
+  variant, creating it), and the deferred record is deleted once the variant is generated. So the deferred store resolves only variants not yet
+  generated, and the file name is the general route. This is read from the contao/image source, not proved on a live site; the Atlas inventory
+  job's unresolved and ambiguous counts are the live measure.
+- `php tests/images_sqlite.php` drives the real controller and service against SQLite with `information_schema` attached, in the shape of a Contao 5.7
+  site with Doublespark's custom columns (31 checks, including one that nothing in the database or project folder changed). Same libraries as
+  `tests/api_sqlite.php`. Not run against a live site or MySQL here.
+- `ContentUrls` is now the one place the bundle works out a news entry's or a page's public address (news publishing uses it too).
+
 ## Not covered
 
-Images and any read endpoint are not part of this version. Categories are read by the `contao-site-info` command (Atlas side), not by an endpoint here.
+Writing image meta, renaming files and redirects are not part of this version (Image Optimisation Phase 3). Categories are read by the `contao-site-info` command (Atlas side), not by an endpoint here.
 
 ## Not verified
 

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Doublespark\ContaoAtlasBundle\Service;
 
 use Contao\CoreBundle\Framework\ContaoFramework;
-use Contao\NewsModel;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -431,23 +430,8 @@ class NewsWriter
     /** Absolute URL of the entry, or null when Contao cannot work one out (no reader page, page unpublished). */
     private function url(int $id): ?string
     {
-        try {
-            $this->framework->initialize();
-            $model = NewsModel::findByPk($id);
-            if (null === $model) {
-                return null;
-            }
-            if (null !== $this->contentUrlGenerator) { // Contao 5.3 and later
-                return $this->contentUrlGenerator->generate($model, [], 1); // 1 = UrlGeneratorInterface::ABSOLUTE_URL
-            }
-            if (method_exists(\Contao\News::class, 'generateNewsUrl')) { // Contao 4.13 to 5.2
-                return \Contao\News::generateNewsUrl($model, false, true);
-            }
-        } catch (\Throwable) {
-            // Fall through: a missing URL must not fail a write that has already succeeded.
-        }
-
-        return null;
+        // A missing URL must not fail a write that has already succeeded; ContentUrls answers null rather than throwing.
+        return (new ContentUrls($this->framework, $this->contentUrlGenerator))->news($id);
     }
 
     private function insertBody(int $newsId, string $html, int $now): int
