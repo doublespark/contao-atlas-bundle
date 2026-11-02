@@ -173,7 +173,7 @@ check('a deferred variant resolves through its stored record', 'deferred_store' 
 check('a generated variant (other format, query string) resolves by its file name', 'filename' === $r[2]['method'] && $hex(1) === $r[2]['uuid'], $r[2]);
 check('two files with the name: ambiguous with both candidates', 'ambiguous' === $r[3]['method'] && null === $r[3]['uuid'] && 2 === count($r[3]['candidates']), $r[3]);
 check('no such file: unresolved', 'unresolved' === $r[4]['method'] && null === $r[4]['uuid'], $r[4]);
-check('folder not the first hash character: unresolved', 'unresolved' === $r[5]['method'], $r[5]);
+check('folder not the first hash character still resolves (live Contao folders are unrelated to the hash)', 'filename' === $r[5]['method'] && $hex(1) === $r[5]['uuid'], $r[5]);
 check('percent-encoded name decoded before the lookup (no such file here)', 'unresolved' === $r[6]['method'], $r[6]);
 [$st] = get($c, 'resolve', ['url' => '/files/hero.png']);
 check('a single url= also accepted', 200 === $st);
@@ -225,6 +225,30 @@ check('uuidsIn: empty, truncated, non-array and empty-array values hold none', [
     && [] === ImageInventory::uuidsIn('s:3:"abc";') && [] === ImageInventory::uuidsIn('a:0:{}'));
 [$st] = get($c, 'list', ['page' => '99']);
 check('a page past the end: 200 with no images', 200 === $st);
+
+// --- live Doublespark variants: the folder is unrelated to the hash, the format can differ from the source, absolute and relative both used ---
+$file(20, 20, 'files/images/bg_panels/map.webp', 'webp');
+$file(21, 21, 'files/images/portfolio/cntech/cntech.webp', 'webp');
+$file(22, 22, 'files/images/portfolio/cntech/cntech.png', 'png');
+$file(23, 23, 'files/images/portfolio/todd-reserarch/todd-research.png', 'png');
+$file(24, 24, 'files/images/seo/software/hotjar/hotjar-conversion-rate-funnel.webp', 'webp');
+$file(25, 25, 'files/images/system/logo/doublespark-google-partner-h-100.webp', 'webp');
+$c = new ImagesController(new ImageInventory($db, new ContentUrls(new Contao\CoreBundle\Framework\ContaoFramework(), null), $root), hash('sha256', 'tok'));
+[$st, $a] = get($c, 'resolve', ['url' => [
+    'https://www.doublespark.co.uk/assets/images/3/map-19q9c3b6bzgg216.webp',
+    '/assets/images/h/cntech-8pg9ss5qb645k1t.webp',
+    'https://www.doublespark.co.uk/assets/images/t/todd-research-s9e8jz5kd9qxqst.png',
+    'https://www.doublespark.co.uk/assets/images/q/hotjar-conversion-rate-funnel-7yfhdhx5kcf9j0q.webp',
+    'https://www.doublespark.co.uk/assets/images/t/doublespark-google-partner-h-100-0ft2kancqk7tm8y.webp',
+]]);
+$r = $a['results'] ?? [];
+check('live samples: map, todd-research, hotjar and the hyphenated logo name resolve by file name',
+    'filename' === $r[0]['method'] && 'files/images/bg_panels/map.webp' === $r[0]['path']
+    && 'filename' === $r[2]['method'] && 'files/images/portfolio/todd-reserarch/todd-research.png' === $r[2]['path']
+    && 'filename' === $r[3]['method'] && 'files/images/seo/software/hotjar/hotjar-conversion-rate-funnel.webp' === $r[3]['path']
+    && 'filename' === $r[4]['method'] && 'files/images/system/logo/doublespark-google-partner-h-100.webp' === $r[4]['path'], $r);
+check('live samples: cntech has a .webp and a .png source, so it is ambiguous with both candidates listed',
+    'ambiguous' === $r[1]['method'] && 2 === count($r[1]['candidates']), $r[1]);
 
 echo $fails ? "FAILED: $fails\n" : "ALL PASSED\n";
 }

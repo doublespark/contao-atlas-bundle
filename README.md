@@ -89,6 +89,14 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.5.2 (2 November 2026) - fix: generated variants no longer rejected for their folder
+
+`GET /atlas-api/images/resolve` refused every generated variant whose one-character folder was not the first character of the hash in the file name.
+On the live Doublespark site the folder is unrelated to that hash (`assets/images/3/map-19q9c3b6bzgg216.webp`, `assets/images/h/cntech-8pg9ss5qb645k1t.webp`),
+so 1,941 of 2,339 stored-page references came back unresolved; the few that resolved by file name (45) are most likely those where the folder happened to match (inference). The folder is no longer checked: the source is
+found from `<source name>-<hash>.<format>` alone, as before. Still read-only. `tests/images_sqlite.php` now covers the live samples (map, todd-research,
+hotjar, a hyphenated logo name, and cntech with a .webp and a .png source as ambiguous). The test libraries are not on the build machine, so only `php -l` ran here.
+
 ### v0.5.1 (2 November 2026) - fix: image list answered 500
 
 `GET /atlas-api/images` failed with `array_push(): Argument #1 ($array) must be of type array, null given` for any image that is used only in a

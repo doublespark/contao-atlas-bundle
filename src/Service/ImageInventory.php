@@ -95,8 +95,9 @@ class ImageInventory
      * Maps a rendered image address back to its source tl_files row. method says how:
      *  - file_path: the address is the source file itself (files/...).
      *  - deferred_store: a variant Contao has not generated yet; assets/images/deferred/<path>.json names the source exactly.
-     *  - filename: a generated variant. Contao names a variant <source file name>-<hash>.<format> in a folder named after the hash's first
-     *    character (contao/image Resizer::createCachePath); the hash covers the resize settings and cannot be reversed, and Contao keeps no
+     *  - filename: a generated variant. Contao names a variant <source file name>-<hash>.<format> in a one-character folder. On the live
+     *    Doublespark site that folder is NOT the hash's first character (map-19q9c3b6bzgg216.webp sits in 3/, 1,941 of 2,339 addresses failed
+     *    on that check in v0.5.1), so the folder is not checked. The hash covers the resize settings and cannot be reversed, and Contao keeps no
      *    record of a variant once it exists (the deferred file is removed when the variant is generated), so the source is the single image
      *    file with that name. Several files with the same name is 'ambiguous', with the candidates listed.
      *  - unresolved: none of the above found it.
@@ -122,10 +123,6 @@ class ImageInventory
         $deferred = $this->deferredSource($dir.'/'.$name.'-'.$hash.'.'.$format);
         if (null !== $deferred && null !== $file = $this->fileByPath($deferred)) {
             return ['method' => 'deferred_store'] + $file + $answer;
-        }
-
-        if (strtolower($dir) !== strtolower($hash[0])) {
-            return $answer; // not a Contao variant name: the folder is always the hash's first character
         }
 
         $like = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $name).'.%';
