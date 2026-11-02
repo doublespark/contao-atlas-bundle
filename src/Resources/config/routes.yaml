@@ -24,3 +24,20 @@ atlas_api_news_delete:
         id: '\d+'
     defaults:
         _token_check: false
+
+atlas_api_pages_show:
+    path: /atlas-api/pages
+    controller: Doublespark\ContaoAtlasBundle\Controller\PagesController::show
+    methods: [GET]
+    defaults:
+        _token_check: false
+
+atlas_api_pages_update:
+    path: /atlas-api/pages/{id}
+    controller: Doublespark\ContaoAtlasBundle\Controller\PagesController::update
+    # POST as well as PUT, for the same servers that refuse PUT
+    methods: [PUT, POST]
+    requirements:
+        id: '\d+'
+    defaults:
+        _token_check: false

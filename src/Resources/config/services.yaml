@@ -23,3 +23,16 @@ services:
         arguments:
             - '%kernel.project_dir%'
         tags: ['console.command']
+
+    Doublespark\ContaoAtlasBundle\Service\PageMetaWriter:
+        arguments:
+            - '@database_connection'
+            - '@contao.framework'
+            - '@?contao.cache.tag_manager'
+
+    Doublespark\ContaoAtlasBundle\Controller\PagesController:
+        public: true
+        arguments:
+            - '@Doublespark\ContaoAtlasBundle\Service\PageMetaWriter'
+            - '%doublespark_contao_atlas.token_hash%'
+        tags: ['controller.service_arguments']

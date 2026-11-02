@@ -79,6 +79,16 @@ on a server always installs exactly what was committed. To ship a change: commit
   doctrine/dbal 3, symfony/http-foundation and their small dependencies as plain checkouts under `tests/lib/` or the folder named by `BUNDLE_TEST_LIB`.
   It proves the PHP logic only, not a site: MySQL types and Contao's own rendering are proved by the Atlas Connect job's smoke test on each site.
 
+### v0.4 (2 November 2026)
+
+- `GET /atlas-api/pages?url=<page address or path>` returns `{id, alias, type, pageTitle, description}` for the page whose alias matches the path (an empty path
+  means the home page, alias `index`). 404 when none, 409 naming the ids when several site roots share the alias.
+- `POST` or `PUT /atlas-api/pages/{id}` sets `pageTitle` and/or `description` (strings, 255 characters at most) on `tl_page` through `PageModel::save()`, then
+  invalidates the page's cache tag (`contao.db.tl_page.<id>`) through `contao.cache.tag_manager` when the site has it. The answer carries the new values, the
+  `previous` ones and `cache_cleared` (false means no tag manager was found, so a cached copy may stay until it expires). POST because some servers refuse PUT.
+- Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
+  Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
+
 ## Not covered
 
 Images and any read endpoint are not part of this version. Categories are read by the `contao-site-info` command (Atlas side), not by an endpoint here.

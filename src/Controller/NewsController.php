@@ -19,6 +19,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class NewsController
 {
+    use BearerAuth;
+
     private const FIELDS = ['archive_id', 'headline', 'teaser', 'body_html', 'alias', 'meta_title', 'meta_description', 'author_id', 'publish_at', 'published', 'atlas_ref', 'category_ids',
         'elements', 'featured', 'link_text', 'og_title', 'og_description'];
 
@@ -153,19 +155,6 @@ class NewsController
         return $out;
     }
 
-    /** A response when the caller is not allowed in, else null. Constant-time comparison of the token's sha256. */
-    private function authenticate(Request $request): ?Response
-    {
-        $header = (string) $request->headers->get('Authorization', '');
-        $token = str_starts_with($header, 'Bearer ') ? substr($header, 7) : '';
-
-        if ('' === $this->tokenHash || '' === $token || !hash_equals($this->tokenHash, hash('sha256', $token))) {
-            return $this->error('Unauthorised.', 401);
-        }
-
-        return null;
-    }
-
     private function input(Request $request): ?array
     {
         $data = json_decode($request->getContent(), true);
@@ -290,10 +279,5 @@ class NewsController
             'exception' => $e::class,
             'message' => mb_substr($e->getMessage(), 0, 1000),
         ], 500);
-    }
-
-    private function error(string $message, int $status): JsonResponse
-    {
-        return new JsonResponse(['error' => $message], $status);
     }
 }
