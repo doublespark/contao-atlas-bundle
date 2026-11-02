@@ -142,7 +142,7 @@ $p = array_column(array_map(static fn ($p) => ['k' => $p['table'].'#'.$p['row_id
 check('content element: type, published, no override, parent article and page', 'image' === $p['tl_content#40']['element_type'] && true === $p['tl_content#40']['published']
     && false === $p['tl_content#40']['overwrite_meta'] && null === $p['tl_content#40']['alt'] && 20 === $p['tl_content#40']['parent']['article_id']
     && 10 === $p['tl_content#40']['parent']['page_id'] && 'about' === $p['tl_content#40']['parent']['page_alias'], $p['tl_content#40']);
-check('hidden gallery reads published false', false === $p['tl_content#41']['published'], $p['tl_content#41']);
+check('hidden gallery reads published false, column kind blob', false === $p['tl_content#41']['published'] && 'blob' === $p['tl_content#41']['column_kind'] && 'binary' === $p['tl_content#40']['column_kind'], $p['tl_content#41']);
 check('news image with overwriteMeta: its own alt and title', true === $p['tl_news#30']['overwrite_meta'] && 'News alt' === $p['tl_news#30']['alt']
     && 'News title' === $p['tl_news#30']['title'] && 30 === $p['tl_news#30']['parent']['news_id'] && 'a-post' === $p['tl_news#30']['parent']['news_alias'], $p['tl_news#30']);
 check('page og image: page parent, no overwriteMeta column means null', 10 === $p['tl_page#10']['parent']['page_id'] && null === $p['tl_page#10']['overwrite_meta'], $p['tl_page#10']);

@@ -102,7 +102,7 @@ Nothing in v0.5 writes: the two routes are GET only, run SELECT statements and r
   column (one UUID, e.g. `singleSRC`, `hofff_st_og_image`, Doublespark's `dsImg_*Src` and `tl_ds_portfolio.main_image`) and every blob column (a
   serialised list, e.g. `multiSRC`) of every `tl_` table, except `tl_files` itself, Contao's bookkeeping tables (versions, undo, log, search, crawl,
   cron, message queue, sessions), user and member permissions, image sizes, and blob columns whose name starts with `order` (`orderSRC` repeats
-  `multiSRC` in sort order). Each placement has `table`, `column`, `row_id`, `element_type` (the row's `type`), `published` (`invisible` inverted
+  `multiSRC` in sort order). Each placement has `table`, `column`, `column_kind` (`binary`: one image, `blob`: a list such as a gallery), `row_id`, `element_type` (the row's `type`), `published` (`invisible` inverted
   where the table has it, else `published`, else null), `overwrite_meta` (null when the table has no such column), the placement's own `alt`,
   `title` (`imageTitle`) and `caption` only when `overwriteMeta` is set, and `parent`: `page_id`/`page_alias`, `article_id`, `news_id`/`news_alias`,
   or `parent_table`/`parent_id` for anything else, plus `url` where Contao can work one out. Content elements are followed through nested elements

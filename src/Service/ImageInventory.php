@@ -222,7 +222,7 @@ class ImageInventory
                 $uuids,
             );
             foreach ($rows as $row) {
-                $found[strtolower((string) $row['ref_hex'])][] = $this->placement($table, $column, $row);
+                $found[strtolower((string) $row['ref_hex'])][] = $this->placement($table, $column, 'binary', $row);
             }
         }
 
@@ -254,7 +254,7 @@ class ImageInventory
                     continue;
                 }
                 unset($row['ref_blob']);
-                $placement = $this->placement($table, $column, $row);
+                $placement = $this->placement($table, $column, 'blob', $row);
                 foreach ($refs as $uuid) {
                     $this->blobIndex[$uuid] ??= [];
                     $this->blobIndex[$uuid][] = $placement;
@@ -307,7 +307,7 @@ class ImageInventory
         return implode(', ', array_map($this->q(...), $cols));
     }
 
-    private function placement(string $table, string $column, array $row): array
+    private function placement(string $table, string $column, string $kind, array $row): array
     {
         $published = null;
         if (\array_key_exists('invisible', $row)) {
@@ -320,6 +320,7 @@ class ImageInventory
         return [
             'table' => $table,
             'column' => $column,
+            'column_kind' => $kind, // binary: the column holds one image (singleSRC), blob: a list (multiSRC, a gallery)
             'row_id' => (int) $row['id'],
             'element_type' => isset($row['type']) ? (string) $row['type'] : null,
             'published' => $published,
