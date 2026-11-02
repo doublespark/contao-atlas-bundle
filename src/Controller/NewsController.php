@@ -16,13 +16,16 @@ use Symfony\Component\HttpFoundation\Response;
  * og_title and og_description, each stored only where the site has the column; the answer reports elements_count, fields_applied and fields_unsupported.
  * 422 when the request is well formed but the site cannot do what it asks: category_ids on a site with no news categories mechanism,
  * a category id the site does not have, or an author_id that is not a back-end user. Categories are never silently dropped, or (category_mode column) a category_ids that is not exactly one whole number. Categories are never silently dropped.
+ * v0.6: `subheadline` (core tl_news.subheadline, the heading many news list templates show) and `image` ({filename, data_base64, alt}: JPEG, PNG or
+ * WebP up to 5 MB, stored under files/atlas-news/ and set as the entry's main image with that alt text). Both are reported in fields_applied /
+ * fields_unsupported; a stored image also answers image_path. Bytes that are not such an image are a 422 and nothing is saved.
  */
 class NewsController
 {
     use BearerAuth;
 
     private const FIELDS = ['archive_id', 'headline', 'teaser', 'body_html', 'alias', 'meta_title', 'meta_description', 'author_id', 'publish_at', 'published', 'atlas_ref', 'category_ids',
-        'elements', 'featured', 'link_text', 'og_title', 'og_description'];
+        'elements', 'featured', 'link_text', 'og_title', 'og_description', 'subheadline', 'image'];
 
     /** Most blocks one entry may be sent as. Doublespark's own format has eight. */
     private const MAX_ELEMENTS = 50;
@@ -201,10 +204,13 @@ class NewsController
         if (array_key_exists('featured', $in) && !\is_bool($in['featured'])) {
             return 'featured must be true or false.';
         }
-        foreach (['link_text', 'og_title', 'og_description'] as $text) {
+        foreach (['link_text', 'og_title', 'og_description', 'subheadline'] as $text) {
             if (array_key_exists($text, $in) && (!\is_string($in[$text]) || mb_strlen($in[$text]) > 255)) {
                 return "$text must be a string of 255 characters or fewer.";
             }
+        }
+        if (array_key_exists('image', $in) && null !== $bad = $this->imageProblem($in['image'])) {
+            return $bad;
         }
         if (array_key_exists('elements', $in)) {
             if (array_key_exists('body_html', $in)) {
@@ -220,6 +226,28 @@ class NewsController
             } catch (\Exception) {
                 return 'publish_at is not a date and time. Use YYYY-MM-DD HH:MM (Europe/London) or an ISO 8601 value.';
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * v0.6. The shape of `image`: an object with filename (a string, 200 at most), data_base64 (a string) and alt (text, 1 to 255). Whether the bytes
+     * are a usable image is the writer's question (a 422), asked after this.
+     */
+    private function imageProblem(mixed $image): ?string
+    {
+        if (!\is_array($image) || array_is_list($image)) {
+            return 'image must be an object with filename, data_base64 and alt.';
+        }
+        if (!isset($image['filename']) || !\is_string($image['filename']) || '' === trim($image['filename']) || mb_strlen($image['filename']) > 200) {
+            return 'image.filename must be a file name of 200 characters or fewer.';
+        }
+        if (!isset($image['data_base64']) || !\is_string($image['data_base64']) || '' === $image['data_base64']) {
+            return 'image.data_base64 must be the file, base64 encoded.';
+        }
+        if (!isset($image['alt']) || !\is_string($image['alt']) || '' === trim($image['alt']) || mb_strlen($image['alt']) > 255) {
+            return 'image.alt must be text of 1 to 255 characters: an image is never stored without alt text.';
         }
 
         return null;

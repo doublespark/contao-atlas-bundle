@@ -31,14 +31,26 @@ use Symfony\Component\HttpFoundation\Request;
 $fails = 0;
 function check(string $what, bool $ok, $detail = ''): void { global $fails; echo ($ok ? 'PASS ' : 'FAIL ').$what.($ok ? '' : '  '.json_encode($detail))."\n"; if (!$ok) { ++$fails; } }
 
-function site(bool $v5, bool $migrated = true): array {
+// v0.6: stands in for Contao's Dbafs (which needs the whole framework): records what was registered and answers a fixed 16-byte uuid.
+class FakeImageStore extends Doublespark\ContaoAtlasBundle\Service\NewsImageStore {
+    public array $registered = [];
+    protected function register(string $path): string { $this->registered[] = $path; return str_repeat("\x01", 16); }
+}
+$projectDir = sys_get_temp_dir().'/atlas-bundle-test-'.getmypid();
+@mkdir($projectDir, 0775, true);
+$store = new FakeImageStore($projectDir, 'files', new Contao\CoreBundle\Framework\ContaoFramework());
+
+function site(bool $v5, bool $migrated = true, bool $withImageStore = true): array {
+    global $store;
     $db = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
     $extra = $v5 ? ", linkText varchar(255) NOT NULL default '', hofff_st char(1) NOT NULL default '', hofff_st_og_type varchar(255) NOT NULL default '', hofff_st_og_title varchar(255) NOT NULL default '', hofff_st_og_description text NULL" : '';
     $published = $v5 ? "integer NOT NULL default 0" : "char(1) NOT NULL default ''";
     $db->executeStatement("CREATE TABLE tl_news (id INTEGER PRIMARY KEY AUTOINCREMENT, pid int NOT NULL default 0, tstamp int NOT NULL default 0, date int NOT NULL default 0, time int NOT NULL default 0,
         alias varchar(255) NOT NULL default '', source varchar(32) NOT NULL default '', headline varchar(255) NOT NULL default '', teaser text NULL, author int NOT NULL default 0,
         pageTitle varchar(255) NOT NULL default '', description text NULL, published $published, start varchar(10) NOT NULL default '', stop varchar(10) NOT NULL default '',
-        featured char(1) NOT NULL default '' $extra)");
+        featured char(1) NOT NULL default '', subheadline varchar(255) NOT NULL default '',
+        addImage ".($v5 ? "boolean NOT NULL default 0" : "char(1) NOT NULL default ''").", overwriteMeta ".($v5 ? "boolean NOT NULL default 0" : "char(1) NOT NULL default ''").",
+        singleSRC blob NULL, alt ".($v5 ? "text NULL" : "varchar(255) NOT NULL default ''")." $extra)");
     $db->executeStatement("CREATE TABLE tl_news_archive (id INTEGER PRIMARY KEY, title varchar(255))");
     $db->executeStatement("INSERT INTO tl_news_archive VALUES (2, 'News')");
     $db->executeStatement("CREATE TABLE tl_user (id INTEGER PRIMARY KEY, name varchar(255))");
@@ -47,7 +59,7 @@ function site(bool $v5, bool $migrated = true): array {
         tstamp int NOT NULL default 0, type varchar(64) NOT NULL default '', text text NULL, headline varchar(255) NOT NULL default '', cssID varchar(255) NOT NULL default '')");
     $db->executeStatement("CREATE TABLE tl_atlas_news_ref (id INTEGER PRIMARY KEY AUTOINCREMENT, tstamp int NOT NULL default 0, atlas_ref varchar(190) NOT NULL default '', news_id int NOT NULL default 0,
         content_id int NOT NULL default 0".($migrated ? ", content_ids varchar(1000) NOT NULL default ''" : '').")");
-    $writer = new NewsWriter($db, new Contao\CoreBundle\Framework\ContaoFramework(), null, 'Europe/London', 0, '', '');
+    $writer = new NewsWriter($db, new Contao\CoreBundle\Framework\ContaoFramework(), null, 'Europe/London', 0, '', '', $withImageStore ? $store : null);
 
     return [$db, new NewsController($writer, hash('sha256', 'tok'))];
 }
@@ -137,6 +149,38 @@ check('4.13 featured stored as char 1', '1' === $db->fetchOne('SELECT featured F
 [$st, $a] = call($c, 'create', $post);
 check('without content_ids: 500 naming contao:migrate', 500 === $st && str_contains((string) ($a['message'] ?? ''), 'contao:migrate'), $a);
 check('without content_ids: nothing written', 0 === (int) $db->fetchOne('SELECT COUNT(*) FROM tl_news') && 0 === (int) $db->fetchOne('SELECT COUNT(*) FROM tl_content'));
+
+// --- v0.6: subheadline and image ---
+$png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='; // a 1x1 PNG
+$image = ['filename' => 'Phone on a desk.PNG', 'data_base64' => $png, 'alt' => 'Smartphone on a desk'];
+foreach ([true, false] as $v5) {
+    $tag = $v5 ? '5.7' : '4.13';
+    [$db, $c] = site($v5);
+    [$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'Img', 'atlas_ref' => 'atlas-piece-7', 'body_html' => '<p>b</p>', 'subheadline' => 'Card heading', 'image' => $image]);
+    check("$tag create with subheadline and image: 201, both applied, image_path answered", 201 === $st && in_array('subheadline', $a['fields_applied'] ?? [], true)
+        && in_array('image', $a['fields_applied'] ?? [], true) && 'files/atlas-news/atlas-piece-7-phone-on-a-desk.png' === ($a['image_path'] ?? null), $a);
+    $news = $db->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [(int) $a['id']]);
+    check("$tag image columns: addImage and overwriteMeta on, uuid in singleSRC, alt, subheadline", '1' === (string) $news['addImage'] && '1' === (string) $news['overwriteMeta']
+        && str_repeat("\x01", 16) === $news['singleSRC'] && 'Smartphone on a desk' === $news['alt'] && 'Card heading' === $news['subheadline'], array_map('bin2hex', array_filter($news, 'is_string')));
+    check("$tag file written under files/atlas-news and registered", is_file("$projectDir/files/atlas-news/atlas-piece-7-phone-on-a-desk.png")
+        && 'files/atlas-news/atlas-piece-7-phone-on-a-desk.png' === end($store->registered));
+    [$st, $a] = call($c, 'update', ['subheadline' => 'New heading'], (int) $a['id']);
+    $news = $db->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [(int) $a['id']]);
+    check("$tag update without image leaves the image alone", 200 === $st && !isset($a['image_path']) && str_repeat("\x01", 16) === $news['singleSRC'] && 'New heading' === $news['subheadline'], $a);
+}
+[$db, $c] = site(true);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'X', 'atlas_ref' => 'r-gif', 'body_html' => '<p>b</p>', 'image' => ['filename' => 'a.gif', 'data_base64' => base64_encode('GIF89a not really'), 'alt' => 'x']]);
+check('an image that is not JPEG, PNG or WebP: 422, nothing created', 422 === $st && 0 === (int) $db->fetchOne('SELECT COUNT(*) FROM tl_news'), $a);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'X', 'atlas_ref' => 'r-b64', 'body_html' => '<p>b</p>', 'image' => ['filename' => 'a.png', 'data_base64' => '***', 'alt' => 'x']]);
+check('image data that is not base64: 422', 422 === $st, $a);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'X', 'atlas_ref' => 'r-alt', 'body_html' => '<p>b</p>', 'image' => ['filename' => 'a.png', 'data_base64' => $png, 'alt' => ' ']]);
+check('an image without alt text: 400', 400 === $st, $a);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'X', 'atlas_ref' => 'r-shape', 'body_html' => '<p>b</p>', 'image' => 'not an object']);
+check('image that is not an object: 400', 400 === $st, $a);
+[$db, $c] = site(true, true, false);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'X', 'atlas_ref' => 'r-nostore', 'body_html' => '<p>b</p>', 'image' => $image]);
+check('no image store: created, image reported unsupported, nothing set', 201 === $st && ['image'] === ($a['fields_unsupported'] ?? null)
+    && '' === (string) $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [(int) $a['id']]), $a);
 
 echo $fails ? "FAILED: $fails\n" : "ALL PASSED\n";
 }

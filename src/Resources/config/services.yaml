@@ -11,6 +11,13 @@ services:
             - '%doublespark_contao_atlas.default_author_id%'
             - '%doublespark_contao_atlas.category_mode%'
             - '%doublespark_contao_atlas.category_column%'
+            - '@Doublespark\ContaoAtlasBundle\Service\NewsImageStore'
+
+    Doublespark\ContaoAtlasBundle\Service\NewsImageStore:
+        arguments:
+            - '%kernel.project_dir%'
+            - '%contao.upload_path%'
+            - '@contao.framework'
 
     Doublespark\ContaoAtlasBundle\Controller\NewsController:
         public: true

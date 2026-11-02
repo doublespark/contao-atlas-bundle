@@ -89,6 +89,20 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.6 (2 November 2026) - card heading and entry image
+
+- `subheadline` (string, 255 at most) on create and update, written to core `tl_news.subheadline`: many news list templates show it as the card heading
+  (Doublespark's `news_latest.html5` does). Reported in `fields_applied`.
+- `image` on create and update: `{"filename": "...", "data_base64": "...", "alt": "..."}`. JPEG, PNG or WebP (read from the bytes, not the name), at most
+  5 MB decoded, alt text required. The file is written to `<upload path>/atlas-news/<atlas_ref>-<file name>.<type>` (normally `files/atlas-news/`), registered
+  through Contao's own `Dbafs::addResource` (which adds the folder to the file manager and returns the uuid), and set as the entry's main image:
+  `addImage`, `singleSRC` (the uuid), `overwriteMeta` and `alt`. The answer carries `image_path` and lists `image` in `fields_applied`. Leaving `image` out
+  changes nothing; re-sending the same file name overwrites that file; a different name is a new file and the old one is left in the file manager.
+- Bad image bytes (not base64, over 5 MB, another type) are a 422 and nothing is saved; a missing or bad shape, or no alt text, is a 400.
+- The image columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7.0, 2 November 2026); flags are written by the
+  column's real type (char(1) on 4.13, boolean on 5.x). `php tests/api_sqlite.php` covers both shapes with a stand-in for Dbafs; the real Dbafs call and the
+  web server's request size limit are proved by the Atlas smoke test on each site.
+
 ### v0.5.2 (2 November 2026) - fix: generated variants no longer rejected for their folder
 
 `GET /atlas-api/images/resolve` refused every generated variant whose one-character folder was not the first character of the hash in the file name.

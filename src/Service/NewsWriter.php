@@ -34,7 +34,10 @@ class NewsWriter
     ];
 
     /** tl_news columns that hold a yes/no flag or an optional timestamp: written by the column's real type (see typed()). */
-    private const FLAGS = ['published', 'featured', 'hofff_st'];
+    private const FLAGS = ['published', 'featured', 'hofff_st', 'addImage', 'overwriteMeta'];
+
+    /** v0.6: the tl_news columns an image needs. Core on 4.13 and 5.x (checked in Contao's source at 4.13.56 and 5.7.0, 2 Nov 2026). */
+    private const IMAGE_COLUMNS = ['addimage', 'singlesrc', 'overwritemeta', 'alt'];
 
     /**
      * v0.3 optional fields => the tl_news column each is written to, only where this site's tl_news HAS that column (found by name):
@@ -42,7 +45,8 @@ class NewsWriter
      * Open Graph fields are the hofff/contao-social-tags extension's columns, which only take effect with its hofff_st switch on and an
      * og type set (see optionalColumns()). A field whose column is missing is reported back as unsupported, never silently dropped.
      */
-    public const OPTIONAL_FIELDS = ['featured' => 'featured', 'link_text' => 'linkText', 'og_title' => 'hofff_st_og_title', 'og_description' => 'hofff_st_og_description'];
+    public const OPTIONAL_FIELDS = ['featured' => 'featured', 'link_text' => 'linkText', 'og_title' => 'hofff_st_og_title', 'og_description' => 'hofff_st_og_description',
+        'subheadline' => 'subheadline'];
     private const OPTIONAL_TIMES = ['start', 'stop'];
 
     /** tl_news columns the bundle writes itself or Contao owns: a category_column may not name one of these. */
@@ -56,6 +60,9 @@ class NewsWriter
     private bool $categoriesProbed = false;
     private string $categoryReason = '';
 
+    /** The image stored by the current create or update, reported back as image_path. */
+    private ?string $imagePath = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly ContaoFramework $framework,
@@ -64,6 +71,7 @@ class NewsWriter
         private readonly int $defaultAuthorId = 0,
         private readonly string $categoryMode = '',
         private readonly string $categoryColumn = '',
+        private readonly ?NewsImageStore $images = null,
     ) {
     }
 
@@ -95,13 +103,14 @@ class NewsWriter
             $in['author_id'] = $author;
         }
         $this->categories(); // probed before the transaction opens
+        $image = $this->storeImage((string) $in['atlas_ref'], $in); // the file is written before the transaction: Contao's Dbafs uses its own connection
 
-        $this->db->transactional(function () use ($in, &$id): void {
+        $this->db->transactional(function () use ($in, $image, &$id): void {
             $now = time();
             $when = $this->whenFrom($in['publish_at'] ?? null) ?? $now;
             $published = (bool) ($in['published'] ?? false);
 
-            $row = $this->plain($in) + $this->optionalColumns($in, null) + [
+            $row = $this->plain($in) + $this->optionalColumns($in, null) + $image + [
                 'pid' => (int) $in['archive_id'],
                 'tstamp' => $now,
                 'date' => $when,
@@ -136,11 +145,12 @@ class NewsWriter
     public function update(int $id, array $in): array
     {
         $this->categories(); // probed before the transaction opens
+        $image = $this->storeImage((string) $this->refFor($id), $in);
 
-        $this->db->transactional(function () use ($id, $in): void {
+        $this->db->transactional(function () use ($id, $in, $image): void {
             $now = time();
             $current = $this->db->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [$id]);
-            $set = $this->plain($in) + $this->optionalColumns($in, $current) + ['tstamp' => $now];
+            $set = $this->plain($in) + $this->optionalColumns($in, $current) + $image + ['tstamp' => $now];
 
             if (isset($in['archive_id'])) {
                 $set['pid'] = (int) $in['archive_id'];
@@ -234,6 +244,13 @@ class NewsWriter
         if (array_key_exists('category_ids', $in)) {
             $applied[] = 'category_ids';
         }
+        if (array_key_exists('image', $in)) {
+            if ($this->imageSupported()) {
+                $applied[] = 'image';
+            } else {
+                $unsupported[] = 'image';
+            }
+        }
 
         return [$applied, $unsupported];
     }
@@ -254,6 +271,9 @@ class NewsWriter
     {
         $author = (int) $this->db->fetchOne('SELECT author FROM tl_news WHERE id = ?', [$id]);
         $out = ['id' => $id, 'url' => $this->url($id), 'author_id' => $author > 0 ? $author : null];
+        if (null !== $this->imagePath) {
+            $out['image_path'] = $this->imagePath;
+        }
 
         if ($this->columnMode()) {
             // Column mode: the single value stored in the category column, read back. An unset column (0 or NULL) is an empty list.
@@ -283,6 +303,10 @@ class NewsWriter
     {
         if (isset($in['author_id']) && !$this->userExists((int) $in['author_id'])) {
             return 'author_id does not name a back-end user on this site.';
+        }
+        // An image on a site whose tl_news cannot hold one is reported as unsupported, not refused. Bad bytes are refused before anything is written.
+        if (isset($in['image']) && $this->imageSupported() && null !== $problem = $this->images->problem($in['image'])) {
+            return $problem;
         }
 
         if ($this->columnMode()) {
@@ -425,6 +449,39 @@ class NewsWriter
         if (null !== $mechanism['blob']) {
             $this->db->update('tl_news', [$mechanism['blob'] => [] === $ids ? null : serialize(array_map('strval', $ids))], ['id' => $newsId]);
         }
+    }
+
+    /** True when this site can store an entry image: an image store is configured and tl_news has the core image columns. */
+    private function imageSupported(): bool
+    {
+        if (null === $this->images) {
+            return false;
+        }
+        foreach (self::IMAGE_COLUMNS as $column) {
+            if (null === ($this->newsColumns()[$column] ?? null)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Writes and registers the image when one was sent and the site can hold it, and answers the tl_news columns that show it as the entry's
+     * main image with Atlas's alt text (overwriteMeta, so the alt is the entry's own and not the file's). Nothing sent: no columns, image unchanged.
+     *
+     * @return array<string,mixed>
+     */
+    private function storeImage(string $atlasRef, array $in): array
+    {
+        $this->imagePath = null;
+        if (!isset($in['image']) || !$this->imageSupported()) {
+            return [];
+        }
+        $stored = $this->images->store($atlasRef, $in['image']);
+        $this->imagePath = $stored['path'];
+
+        return ['addImage' => true, 'singleSRC' => $stored['uuid'], 'overwriteMeta' => true, 'alt' => (string) $in['image']['alt']];
     }
 
     /** Absolute URL of the entry, or null when Contao cannot work one out (no reader page, page unpublished). */
