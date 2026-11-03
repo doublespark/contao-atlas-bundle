@@ -7,7 +7,7 @@ namespace Doublespark\ContaoAtlasBundle\Service;
 use Doctrine\DBAL\Connection;
 
 /**
- * v0.5, read-only. Lists the site's image files (tl_files), every placement that references each one, and maps a rendered assets/images/ variant
+ * v0.5, read-only (v0.7 only adds the version and capability fields to the list answer). Lists the site's image files (tl_files), every placement that references each one, and maps a rendered assets/images/ variant
  * address back to its source file. Strictly SELECT statements and file reads: nothing here writes to the database or the filesystem, and nothing
  * asks Contao's image factory for a variant (which would create one).
  *
@@ -31,6 +31,10 @@ class ImageInventory
 
     public const MAX_PER_PAGE = 500;
 
+    /** v0.7: what this bundle can do beyond the reads, so Atlas can refuse to push to a site that cannot take it (POST /atlas-api/images/meta). */
+    public const BUNDLE_VERSION = '0.7';
+    public const CAPABILITIES = ['images_meta_write'];
+
     /** @var array<string, array<string, string>>|null table => column => column type (lower case) */
     private ?array $schema = null;
 
@@ -47,7 +51,7 @@ class ImageInventory
     /**
      * One page of image files, oldest id first, each with its meta per language and every placement that references it.
      *
-     * @return array{page:int,per_page:int,total:int,pages:int,uuid_columns:list<string>,images:list<array>}
+     * @return array{page:int,per_page:int,total:int,pages:int,bundle_version:string,capabilities:list<string>,uuid_columns:list<string>,images:list<array>}
      */
     public function listImages(int $page, int $perPage): array
     {
@@ -86,6 +90,8 @@ class ImageInventory
             'per_page' => $perPage,
             'total' => $total,
             'pages' => (int) ceil($total / $perPage),
+            'bundle_version' => self::BUNDLE_VERSION,
+            'capabilities' => self::CAPABILITIES,
             'uuid_columns' => $this->columnNames(),
             'images' => $images,
         ];

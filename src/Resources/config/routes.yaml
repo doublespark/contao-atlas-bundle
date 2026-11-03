@@ -42,11 +42,19 @@ atlas_api_pages_update:
     defaults:
         _token_check: false
 
-# v0.5, read-only: the image inventory and the variant resolver. GET only; nothing under these routes writes.
+# v0.5, read-only: the image inventory and the variant resolver. GET only; nothing under these two routes writes (the meta route below is the v0.7 write).
 atlas_api_images_list:
     path: /atlas-api/images
     controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::list
     methods: [GET]
+    defaults:
+        _token_check: false
+
+# v0.7, the one write: set the alt and title of a file or of a placement override (409 with the live values when the site changed since the inventory).
+atlas_api_images_meta:
+    path: /atlas-api/images/meta
+    controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::meta
+    methods: [POST]
     defaults:
         _token_check: false
 

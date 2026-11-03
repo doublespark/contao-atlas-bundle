@@ -55,9 +55,21 @@ services:
             - '@Doublespark\ContaoAtlasBundle\Service\ContentUrls'
             - '%kernel.project_dir%'
 
+    Doublespark\ContaoAtlasBundle\Service\ContaoImageMetaGateway:
+        arguments:
+            - '@database_connection'
+            - '@contao.framework'
+
+    Doublespark\ContaoAtlasBundle\Service\ImageMetaWriter:
+        arguments:
+            - '@Doublespark\ContaoAtlasBundle\Service\ContaoImageMetaGateway'
+            - '@?contao.cache.tag_manager'
+            - '@?monolog.logger.contao.general'
+
     Doublespark\ContaoAtlasBundle\Controller\ImagesController:
         public: true
         arguments:
             - '@Doublespark\ContaoAtlasBundle\Service\ImageInventory'
             - '%doublespark_contao_atlas.token_hash%'
+            - '@Doublespark\ContaoAtlasBundle\Service\ImageMetaWriter'
         tags: ['controller.service_arguments']

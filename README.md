@@ -89,6 +89,33 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.7 (3 November 2026) - write image alt and title (Image Optimisation Phase 3)
+
+(The version after v0.6, which was the news entry image; the Phase 3 brief called this v0.6.)
+
+- `POST /atlas-api/images/meta`, the same bearer token as every other call. JSON body: `uuid` (the file's 32 hex characters), `language` (a code such as
+  `en`; left out it is the language of the site's fallback root page, 422 when there is none), `target`, `alt` and/or `title` (255 characters at most; only
+  the fields sent are changed), and for each field sent `expected_alt` / `expected_title`: the value the caller believes is live (`""` for empty).
+- `target` is `"file"` (the file's own meta in that language) or a placement `{"table":"tl_content","id":12,"column":"singleSRC"}` as `GET /atlas-api/images`
+  returns it (`table`, `row_id`, `column`): the element's own override, its `alt` and `imageTitle` columns.
+- **Refuses rather than overwrites.** If any field's live value is not exactly the expected one the answer is 409 with `live` (both values) and `mismatch`
+  (expected against live per field), and nothing is written. Meta that cannot be read as a serialised list is 422 and is never replaced.
+- File: `tl_files.meta` is read as Contao's serialised language => fields list, the language's `alt` and `title` are set, and the list is saved through
+  `FilesModel::save()`. The caption, link, license and every other key of that language, and every other language, are carried through unchanged.
+- Placement: only `alt`, `imageTitle` and `tstamp` of that row, and only while the row has `overwriteMeta` on and holds this file in `column`. A gallery
+  (list) column, a table without the three columns and a row that does not hold the file are 422; no such row is 404.
+- Answer: `before` and `after` (`alt`, `title`), `changed` (false when the live values already equal the new ones, nothing then written, invalidated or
+  logged), `cache_tags`, `cache_cleared` and `logged`.
+- **Cache.** After a change the HTTP cache is invalidated by tag through `contao.cache.tag_manager` (the way `PageMetaWriter` already does): `contao.db.tl_files.<id>`
+  for a file; for a placement `contao.db.<table>.<id>` and the tags of its parents (the article, the page, the news entry). `cache_cleared` is false when
+  the site has no tag manager (Contao 4.13 sites may not), so a cached copy can stay until it expires; Atlas's verification fetches the live page to see.
+  Which tags Contao's own backend save invalidates was not checked against Contao's source on this machine: these are the `contao.db.<table>.<id>` form that
+  v0.4 already uses for pages.
+- **Log.** A line naming Atlas is written to Contao's system log (`monolog.logger.contao.general`, General) for every change.
+- `GET /atlas-api/images` now also answers `bundle_version` and `capabilities` (`["images_meta_write"]`), which is how Atlas knows a site can take the write.
+- `php tests/image_meta.php` runs with no libraries (a fake gateway stands in for Contao and the database): the meta array handling, the 409 refusal, the file path, the
+  placement path, the cache and log calls. `ContaoImageMetaGateway` (FilesModel, DBAL) is not covered by it and not run against a live Contao: `php -l` only.
+
 ### v0.6 (2 November 2026) - card heading and entry image
 
 - `subheadline` (string, 255 at most) on create and update, written to core `tl_news.subheadline`: many news list templates show it as the card heading
