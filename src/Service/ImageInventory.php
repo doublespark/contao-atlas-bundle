@@ -32,7 +32,7 @@ class ImageInventory
     public const MAX_PER_PAGE = 500;
 
     /** v0.7: what this bundle can do beyond the reads, so Atlas can refuse to push to a site that cannot take it (POST /atlas-api/images/meta). */
-    public const BUNDLE_VERSION = '0.7.1';
+    public const BUNDLE_VERSION = '0.8';
     public const CAPABILITIES = ['images_meta_write', 'images_invalidate'];
 
     /** @var array<string, array<string, string>>|null table => column => column type (lower case) */

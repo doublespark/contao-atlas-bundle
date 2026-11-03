@@ -89,6 +89,23 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.8 (3 November 2026) - an address resolves to a page the way Contao routes it
+
+- `GET /atlas-api/pages?url=` used to match the path's alias against every page on the site, so a site with two roots that each have a home page (alias `index`)
+  answered 409 for every address (www.sjhallplant.com, ids 3 and 161, found 3 November 2026). It now resolves in Contao's order: the URL's **host** picks the
+  site root (a root whose `dns` is that host; else its www or apex twin; else a root with an empty `dns`, which answers any host), the root's **URL prefix**
+  (`urlPrefix`, the language) and **URL suffix** (`urlSuffix`) are taken off the path, then the alias is matched, and only among pages that sit under that root
+  (found by walking up `pid`). An empty path is the home page (alias `index`). A URL with no host (a bare path) is not filtered by host, as before.
+- **The 409 stays.** If more than one page still matches inside the chosen root(s), nothing is chosen and the ids are named. Writes (`POST`/`PUT /atlas-api/pages/{id}`)
+  are by id and unchanged. `images/resolve` resolves files and generated image variants, not pages, so it shares no lookup with this and is unchanged.
+- Leniency, on purpose: a path missing the root's suffix still resolves (the address is handed over by a person); a root-type page or a folder is never a match.
+- **Inference, not checked:** implemented in the bundle's own SQL and PHP, not through Contao's page finder (it routes a live request and its API differs between 4.13
+  and 5.x), and Contao's source is not on the build machine, so the exact www/apex rule and the prefix/suffix handling are from memory of Contao's routing. The
+  proof is `contao-connect --verify-only` on each site.
+- `php tests/pages_sqlite.php` (needs `BUNDLE_TEST_VENDOR`, a composer `vendor/` with doctrine/dbal and symfony/http-foundation) covers two roots with different dns,
+  an empty-dns root beside a matching one, a genuine duplicate inside one root (409), nested pages, and prefix and suffix, on a table with and without the
+  `urlPrefix`/`urlSuffix` columns (the 5.x and an older shape). It does not run Contao itself, so 4.13 is a table shape here, not a 4.13 install.
+
 ### v0.7.1 (3 November 2026) - invalidate the tags the pages actually carry
 
 v0.7 invalidated only `contao.db.tl_files.<id>`. On the live Doublespark site the cache-busted fetch showed the new alt and title on every page but the plain
@@ -101,7 +118,7 @@ fetch still served the old HTML on about half of them, so page responses are not
   The full list is in `cache_tags` in the answer. A placement write invalidates that row's tag and its parents', now through the same resolver.
 - `POST /atlas-api/images/invalidate` with `{"uuid": "<32 hex>"}` does the same invalidation **without changing any data** (404 for an unknown file, 400 for a bad
   uuid, 401 without the token). The answer is `{target, uuid, changed: false, cache_tags, cache_cleared, logged}`. A line naming Atlas goes to Contao's system log.
-- `GET /atlas-api/images` answers `bundle_version` `0.7.1` and `capabilities` `["images_meta_write", "images_invalidate"]`. Each placement's `parent` also carries
+- `GET /atlas-api/images` answers `bundle_version` `0.8` and `capabilities` `["images_meta_write", "images_invalidate"]`. Each placement's `parent` also carries
   `content_chain` (the enclosing element ids) and `news_archive_id`.
 - `CacheTags` (pure) does the resolution and is covered by `php tests/image_meta.php`. **Inference, not checked:** Contao's source is not on the build machine, so that
   these are exactly the tags a page response carries is unproved; `contao.cache.tag_manager` is still the call (the one `PageMetaWriter` uses). Contao 5 also has an

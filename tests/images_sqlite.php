@@ -150,7 +150,7 @@ $logo = $byPath['files/logo.svg'];
 $nested = array_values(array_filter($logo['placements'], static fn ($x) => 43 === $x['row_id']))[0] ?? [];
 check('element inside an element group is followed up to its news entry', 'tl_content' === ($nested['table'] ?? '') && 'dsImg_defaultSrc' === $nested['column'] && 30 === $nested['parent']['news_id'], $nested);
 check('custom portfolio column found by the schema scan', ['tl_ds_portfolio.main_image#50'] === $where($byPath['files/team/banner.jpg']) && null === $byPath['files/team/banner.jpg']['placements'][0]['parent']['page_id'], $byPath['files/team/banner.jpg']);
-check('v0.7: the list advertises the meta write so Atlas can refuse a site without it', '0.7.1' === ($a['bundle_version'] ?? null) && in_array('images_meta_write', $a['capabilities'] ?? [], true) && in_array('images_invalidate', $a['capabilities'] ?? [], true), [$a['bundle_version'] ?? null, $a['capabilities'] ?? null]);
+check('v0.7: the list advertises the meta write so Atlas can refuse a site without it', '0.8' === ($a['bundle_version'] ?? null) && in_array('images_meta_write', $a['capabilities'] ?? [], true) && in_array('images_invalidate', $a['capabilities'] ?? [], true), [$a['bundle_version'] ?? null, $a['capabilities'] ?? null]);
 check('uuid_columns lists the custom columns, not tl_files, tl_user, orderSRC or another schema', in_array('tl_ds_portfolio.main_image', $a['uuid_columns'], true)
     && in_array('tl_content.dsImg_defaultSrc', $a['uuid_columns'], true) && !array_filter($a['uuid_columns'], static fn ($x) => str_starts_with($x, 'tl_files.') || str_starts_with($x, 'tl_user.') || str_ends_with($x, 'orderSRC') || str_ends_with($x, 'otherSRC')), $a['uuid_columns']);
 
