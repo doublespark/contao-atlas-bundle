@@ -32,8 +32,8 @@ class ImageInventory
     public const MAX_PER_PAGE = 500;
 
     /** v0.7: what this bundle can do beyond the reads, so Atlas can refuse to push to a site that cannot take it (POST /atlas-api/images/meta). */
-    public const BUNDLE_VERSION = '0.7';
-    public const CAPABILITIES = ['images_meta_write'];
+    public const BUNDLE_VERSION = '0.7.1';
+    public const CAPABILITIES = ['images_meta_write', 'images_invalidate'];
 
     /** @var array<string, array<string, string>>|null table => column => column type (lower case) */
     private ?array $schema = null;
@@ -147,6 +147,29 @@ class ImageInventory
         }
 
         return $answer;
+    }
+
+    /**
+     * v0.7.1. Every placement that references one file, as listImages() describes it (the parents included), for the cache tags of the pages that
+     * show it. Read only.
+     *
+     * @return list<array>
+     */
+    public function placementsOfUuid(string $uuidHex): array
+    {
+        $uuidHex = strtolower($uuidHex);
+
+        return $this->placementsFor([$uuidHex])[$uuidHex] ?? [];
+    }
+
+    /**
+     * v0.7.1. The parents of one placement row (as the writer read it), in the shape of a placement, for its cache tags. Read only.
+     *
+     * @return array<string, mixed>
+     */
+    public function placementOfRow(string $table, array $row): array
+    {
+        return ['table' => $table, 'row_id' => (int) $row['id'], 'parent' => $this->parent($table, $row)];
     }
 
     /**
@@ -346,7 +369,8 @@ class ImageInventory
      */
     private function parent(string $table, array $row): array
     {
-        $out = ['page_id' => null, 'page_alias' => null, 'article_id' => null, 'news_id' => null, 'news_alias' => null, 'parent_table' => null, 'parent_id' => null, 'url' => null];
+        $out = ['page_id' => null, 'page_alias' => null, 'article_id' => null, 'news_id' => null, 'news_alias' => null, 'parent_table' => null, 'parent_id' => null, 'url' => null,
+            'news_archive_id' => null, 'content_chain' => []];
         $id = (int) $row['id'];
 
         if ('tl_page' === $table) {
@@ -360,6 +384,7 @@ class ImageInventory
             $ptable = (string) ($row['ptable'] ?? '') ?: 'tl_article'; // an empty ptable is an article element (Contao 3 rows)
             $pid = (int) ($row['pid'] ?? 0);
             for ($depth = 0; 'tl_content' === $ptable && $pid > 0 && $depth < 10; ++$depth) {
+                $out['content_chain'][] = $pid; // v0.7.1: the enclosing elements carry cache tags of their own
                 $up = $this->db->fetchAssociative('SELECT pid, ptable FROM tl_content WHERE id = ?', [$pid]);
                 if (false === $up) {
                     break;
@@ -383,6 +408,8 @@ class ImageInventory
         }
 
         if (null !== $out['news_id']) {
+            $archive = 'tl_news' === $table && isset($row['pid']) ? $row['pid'] : $this->db->fetchOne('SELECT pid FROM tl_news WHERE id = ?', [$out['news_id']]);
+            $out['news_archive_id'] = false === $archive || null === $archive ? null : (int) $archive;
             [$out['news_alias'], $out['url']] = $this->addressOf('tl_news', $out['news_id']);
         } elseif (null !== $out['page_id']) {
             [$out['page_alias'], $out['url']] = $this->addressOf('tl_page', $out['page_id']);

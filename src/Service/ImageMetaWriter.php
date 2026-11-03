@@ -16,6 +16,7 @@ namespace Doublespark\ContaoAtlasBundle\Service;
  * field it sends). If the live value differs, the answer is 409 with the live values and nothing is written. An unreadable meta value is refused
  * too, never replaced.
  *
+ * v0.7.1: a file write invalidates the tags of every row that references the file and of their parents (CacheTags), and invalidate() does the same with no write.
  * After a save the HTTP cache is invalidated by tag, the way Contao does on a backend save: contao.db.tl_files.<id> for a file, and
  * contao.db.<table>.<id> plus the parents' tags (article, page, news entry) for a placement, through contao.cache.tag_manager where the site has
  * one (Contao 4.13 sites may not, and the answer then says cache_cleared false). A system log entry naming Atlas is written to Contao's log.
@@ -81,12 +82,37 @@ class ImageMetaWriter
         if ($changed) {
             $this->gateway->saveFileMeta($uuid, ImageMeta::serialise(ImageMeta::apply($meta, $language, $set)));
         }
-        $tags = $changed ? ['contao.db.tl_files.'.$file['id']] : [];
-        $cleared = $this->invalidate($tags);
+        // v0.7.1: the file's own tag AND the tags of every row that shows it (v0.7 sent only the file tag, which page responses are not tagged with)
+        $tags = $changed ? $this->gateway->referenceTags($uuid, $file['id']) : [];
+        $cleared = $this->invalidateTags($tags);
         $logged = $changed && $this->log(sprintf('Atlas set the alt and title of image file ID %d (%s): %s', $file['id'], $language, $this->describe($before, $after)));
 
         return ['target' => 'file', 'uuid' => $uuid, 'language' => $language, 'before' => $before, 'after' => $after, 'changed' => $changed,
             'cache_tags' => $tags, 'cache_cleared' => $cleared, 'logged' => $logged];
+    }
+
+    /**
+     * v0.7.1. Invalidates the cache tags of one image (its file tag and every referencing row's and parents') WITHOUT changing any data, for the
+     * pages that kept serving the old HTML after a write. POST /atlas-api/images/invalidate {uuid}.
+     *
+     * @param array<string, mixed> $request uuid
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ImageMetaRefused
+     */
+    public function invalidate(array $request): array
+    {
+        $uuid = $this->uuid($request['uuid'] ?? null);
+        $file = $this->gateway->file($uuid);
+        if (null === $file) {
+            throw new ImageMetaRefused(404, ['error' => 'Contao has no image file with that uuid.', 'uuid' => $uuid]);
+        }
+        $tags = $this->gateway->referenceTags($uuid, $file['id']);
+        $cleared = $this->invalidateTags($tags);
+        $logged = $cleared && $this->log(sprintf('Atlas cleared the cached pages of image file ID %d (%d cache tags), no data changed', $file['id'], \count($tags)));
+
+        return ['target' => 'file', 'uuid' => $uuid, 'changed' => false, 'cache_tags' => $tags, 'cache_cleared' => $cleared, 'logged' => $logged];
     }
 
     /** @return array<string, mixed> */
@@ -144,7 +170,7 @@ class ImageMetaWriter
             $this->gateway->saveRow($table, $id, $values);
             $tags = array_values(array_unique(array_merge(["contao.db.$table.$id"], $this->gateway->parentTags($table, $row))));
         }
-        $cleared = $this->invalidate($tags);
+        $cleared = $this->invalidateTags($tags);
         $logged = $changed && $this->log(sprintf('Atlas set the alt and title override of %s ID %d: %s', $table, $id, $this->describe($before, $after)));
 
         return ['target' => 'placement', 'uuid' => $uuid, 'table' => $table, 'id' => $id, 'column' => $column, 'fields' => self::PLACEMENT_FIELDS,
@@ -232,7 +258,7 @@ class ImageMetaWriter
     }
 
     /** @param list<string> $tags */
-    private function invalidate(array $tags): bool
+    private function invalidateTags(array $tags): bool
     {
         if ([] === $tags || null === $this->tagManager || !method_exists($this->tagManager, 'invalidateTags')) {
             return false;

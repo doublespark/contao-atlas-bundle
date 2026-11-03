@@ -58,6 +58,14 @@ atlas_api_images_meta:
     defaults:
         _token_check: false
 
+# v0.7.1: clear the cached pages of one image without changing data (the pages that kept serving the old HTML after a write).
+atlas_api_images_invalidate:
+    path: /atlas-api/images/invalidate
+    controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::invalidate
+    methods: [POST]
+    defaults:
+        _token_check: false
+
 atlas_api_images_resolve:
     path: /atlas-api/images/resolve
     controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::resolve

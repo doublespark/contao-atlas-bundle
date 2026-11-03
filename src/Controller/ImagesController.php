@@ -52,6 +52,30 @@ class ImagesController
         }
     }
 
+    /** v0.7.1. POST /atlas-api/images/invalidate {uuid}: clears the cached pages of one image without changing any data. */
+    public function invalidate(Request $request): Response
+    {
+        if (null !== $denied = $this->authenticate($request)) {
+            return $denied;
+        }
+        if (null === $this->writer) {
+            return $this->error('This site\'s bundle was installed without the image meta writer.', 501);
+        }
+
+        try {
+            $body = json_decode((string) $request->getContent(), true);
+            if (!\is_array($body) || array_is_list($body)) {
+                return $this->error('Send a JSON object: {"uuid": "<32 hex characters>"}.', 400);
+            }
+
+            return new JsonResponse($this->writer->invalidate($body), 200);
+        } catch (ImageMetaRefused $e) {
+            return new JsonResponse($e->body, $e->status);
+        } catch (\Throwable $e) {
+            return new JsonResponse(['error' => 'The cache could not be cleared.', 'exception' => $e::class, 'message' => mb_substr($e->getMessage(), 0, 1000)], 500);
+        }
+    }
+
     public function list(Request $request): Response
     {
         if (null !== $denied = $this->authenticate($request)) {

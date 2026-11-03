@@ -89,6 +89,25 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.7.1 (3 November 2026) - invalidate the tags the pages actually carry
+
+v0.7 invalidated only `contao.db.tl_files.<id>`. On the live Doublespark site the cache-busted fetch showed the new alt and title on every page but the plain
+fetch still served the old HTML on about half of them, so page responses are not tagged with the file.
+
+- A file write (`POST /atlas-api/images/meta`, `target: "file"`) now invalidates, in one call, the file's tag **and** the tags of every row that references the
+  file, found by the same schema scan as `GET /atlas-api/images` (every binary(16) column and every blob list, galleries included), and of each row's parents:
+  `contao.db.<table>.<id>` for the row, `contao.db.tl_content.<id>` for each enclosing element, `contao.db.tl_article.<id>`, `contao.db.tl_page.<id>`,
+  `contao.db.tl_news.<id>` and `contao.db.tl_news_archive.<id>` (the archive is what a news list page is built from), and any other parent table the scan finds.
+  The full list is in `cache_tags` in the answer. A placement write invalidates that row's tag and its parents', now through the same resolver.
+- `POST /atlas-api/images/invalidate` with `{"uuid": "<32 hex>"}` does the same invalidation **without changing any data** (404 for an unknown file, 400 for a bad
+  uuid, 401 without the token). The answer is `{target, uuid, changed: false, cache_tags, cache_cleared, logged}`. A line naming Atlas goes to Contao's system log.
+- `GET /atlas-api/images` answers `bundle_version` `0.7.1` and `capabilities` `["images_meta_write", "images_invalidate"]`. Each placement's `parent` also carries
+  `content_chain` (the enclosing element ids) and `news_archive_id`.
+- `CacheTags` (pure) does the resolution and is covered by `php tests/image_meta.php`. **Inference, not checked:** Contao's source is not on the build machine, so that
+  these are exactly the tags a page response carries is unproved; `contao.cache.tag_manager` is still the call (the one `PageMetaWriter` uses). Contao 5 also has an
+  entity-level helper (`contao.cache.entity_tags`, as remembered), which was not used because it could not be checked here. The proof is Atlas's re-verify on the site.
+  `ContaoImageMetaGateway` and `tests/images_sqlite.php` were not run here (the SQLite test needs libraries that are not on this machine): `php -l` only.
+
 ### v0.7 (3 November 2026) - write image alt and title (Image Optimisation Phase 3)
 
 (The version after v0.6, which was the news entry image; the Phase 3 brief called this v0.6.)

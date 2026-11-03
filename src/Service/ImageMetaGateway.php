@@ -37,4 +37,12 @@ interface ImageMetaGateway
      * @return list<string>
      */
     public function parentTags(string $table, array $row): array;
+
+    /**
+     * v0.7.1. Cache tags for an image file as a whole: its own tag and, for every row that references it (any table, any column, galleries
+     * included), that row's tag and its parents' (CacheTags::forImage).
+     *
+     * @return list<string>
+     */
+    public function referenceTags(string $uuidHex, int $fileId): array;
 }

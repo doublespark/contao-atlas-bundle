@@ -15,6 +15,7 @@ spl_autoload_register(static function (string $c): void {
     if (str_starts_with($c, $p)) { $f = dirname(__DIR__).'/src/'.str_replace('\\', '/', substr($c, strlen($p))).'.php'; if (is_file($f)) { require $f; } }
 });
 
+use Doublespark\ContaoAtlasBundle\Service\CacheTags;
 use Doublespark\ContaoAtlasBundle\Service\ImageMeta;
 use Doublespark\ContaoAtlasBundle\Service\ImageMetaGateway;
 use Doublespark\ContaoAtlasBundle\Service\ImageMetaRefused;
@@ -27,7 +28,7 @@ final class FakeGateway implements ImageMetaGateway
 {
     public array $savedMeta = [];
     public array $savedRows = [];
-    public function __construct(public array $files = [], public array $tables = [], public array $types = [], public ?string $fallback = 'en') {}
+    public function __construct(public array $files = [], public array $tables = [], public array $types = [], public ?string $fallback = 'en', public array $placements = []) {}
     public function fallbackLanguage(): ?string { return $this->fallback; }
     public function file(string $uuidHex): ?array { return $this->files[$uuidHex] ?? null; }
     public function saveFileMeta(string $uuidHex, string $serialised): void { $this->savedMeta[$uuidHex] = $serialised; $this->files[$uuidHex]['meta'] = $serialised; }
@@ -36,6 +37,7 @@ final class FakeGateway implements ImageMetaGateway
     public function row(string $table, int $id): ?array { return $this->tables[$table][$id] ?? null; }
     public function saveRow(string $table, int $id, array $values): void { $this->savedRows[] = [$table, $id, $values]; $this->tables[$table][$id] = $values + $this->tables[$table][$id]; }
     public function parentTags(string $table, array $row): array { return ['contao.db.tl_article.7', 'contao.db.tl_page.3']; }
+    public function referenceTags(string $uuidHex, int $fileId): array { return CacheTags::forImage($fileId, $this->placements); }
 }
 final class FakeTags { public array $invalidated = []; public function invalidateTags(array $t): void { $this->invalidated[] = $t; } }
 final class FakeLog { public array $lines = []; public function info(string $m, array $c = []): void { $this->lines[] = [$m, $c]; } }
@@ -69,6 +71,7 @@ check('file: before and after are returned', $r['before'] === ['alt' => 'Old alt
 $saved = ImageMeta::parse($g->savedMeta[$hex] ?? null);
 check('file: saved meta has the new alt and title and keeps caption, link, license and German', is_array($saved) && $saved['en']['alt'] === 'New alt' && $saved['en']['caption'] === 'A caption' && $saved['en']['link'] === 'https://x.test/' && $saved['en']['license'] === 'CC0' && $saved['de'] === $meta['de'], $saved);
 check('file: the file cache tag is invalidated and reported', $tags->invalidated === [['contao.db.tl_files.42']] && true === $r['cache_cleared'] && $r['cache_tags'] === ['contao.db.tl_files.42']);
+
 check('file: the Contao log names Atlas', 1 === count($log->lines) && str_contains($log->lines[0][0], 'Atlas') && str_contains($log->lines[0][0], 'image file ID 42') && true === $r['logged'] && isset($log->lines[0][1]['contao']));
 $r = writer($g)->write(['uuid' => strtoupper($hex), 'language' => 'en', 'target' => 'file', 'alt' => 'New alt', 'expected_alt' => 'New alt']);
 check('file: writing the value already live changes nothing and invalidates nothing', false === $r['changed'] && false === $r['cache_cleared'] && [] === $r['cache_tags']);
@@ -138,6 +141,49 @@ check('no tag manager: the write still happens and the answer says cache_cleared
 $g = new FakeGateway([], ['tl_content' => [12 => $row]], $types);
 $r = writer($g)->write(['uuid' => $hex, 'target' => $target, 'alt' => 'Changed', 'expected_alt' => 'Override alt']);
 check('no tag manager and no logger: changed true, cache_cleared false, logged false', true === $r['changed'] && false === $r['cache_cleared'] && false === $r['logged']);
+
+// --- v0.7.1: the cache tags of every page that shows the image (CacheTags, pure) ---
+$parent = static fn (array $over = []): array => $over + ['page_id' => null, 'article_id' => null, 'news_id' => null, 'news_archive_id' => null, 'content_chain' => [], 'parent_table' => null, 'parent_id' => null];
+check('tags: a file is tagged by its tl_files row', 'contao.db.tl_files.42' === CacheTags::forFile(42));
+check('tags: a content element in an article gives the element, its article and its page',
+    CacheTags::forPlacement(['table' => 'tl_content', 'row_id' => 12, 'parent' => $parent(['article_id' => 7, 'page_id' => 3])]) === ['contao.db.tl_content.12', 'contao.db.tl_article.7', 'contao.db.tl_page.3']);
+check('tags: an element nested in element groups gives each enclosing element too, then the article and page',
+    CacheTags::forPlacement(['table' => 'tl_content', 'row_id' => 43, 'parent' => $parent(['content_chain' => [42, 41], 'article_id' => 7, 'page_id' => 3])])
+    === ['contao.db.tl_content.43', 'contao.db.tl_content.42', 'contao.db.tl_content.41', 'contao.db.tl_article.7', 'contao.db.tl_page.3']);
+check('tags: an element of a news entry gives the entry and its archive (the list pages), no page',
+    CacheTags::forPlacement(['table' => 'tl_content', 'row_id' => 50, 'parent' => $parent(['news_id' => 30, 'news_archive_id' => 2])]) === ['contao.db.tl_content.50', 'contao.db.tl_news.30', 'contao.db.tl_news_archive.2']);
+check('tags: the news entry\'s own image gives the entry and the archive',
+    CacheTags::forPlacement(['table' => 'tl_news', 'row_id' => 30, 'parent' => $parent(['news_id' => 30, 'news_archive_id' => 2])]) === ['contao.db.tl_news.30', 'contao.db.tl_news_archive.2']);
+check('tags: a page\'s own image (an og image column) gives the page once',
+    CacheTags::forPlacement(['table' => 'tl_page', 'row_id' => 10, 'parent' => $parent(['page_id' => 10])]) === ['contao.db.tl_page.10']);
+check('tags: a custom table with an unknown parent gives its own tag and that parent',
+    CacheTags::forPlacement(['table' => 'tl_ds_portfolio', 'row_id' => 50, 'parent' => $parent(['parent_table' => 'tl_ds_category', 'parent_id' => 4])]) === ['contao.db.tl_ds_portfolio.50', 'contao.db.tl_ds_category.4']);
+check('tags: nothing is invented for missing parents, and a table name that is not tl_ is ignored',
+    CacheTags::forPlacement(['table' => 'tl_content', 'row_id' => 9, 'parent' => $parent()]) === ['contao.db.tl_content.9'] && [] === CacheTags::forPlacement(['table' => 'users', 'row_id' => 1, 'parent' => $parent()]));
+$two = [
+    ['table' => 'tl_content', 'row_id' => 12, 'parent' => $parent(['article_id' => 7, 'page_id' => 3])],
+    ['table' => 'tl_content', 'row_id' => 13, 'parent' => $parent(['article_id' => 7, 'page_id' => 3])],
+    ['table' => 'tl_news', 'row_id' => 30, 'parent' => $parent(['news_id' => 30, 'news_archive_id' => 2])],
+];
+check('tags: an image shown in several places gives the file tag first and every tag once',
+    CacheTags::forImage(42, $two) === ['contao.db.tl_files.42', 'contao.db.tl_content.12', 'contao.db.tl_article.7', 'contao.db.tl_page.3', 'contao.db.tl_content.13', 'contao.db.tl_news.30', 'contao.db.tl_news_archive.2']);
+check('tags: an image placed nowhere still gives its file tag', CacheTags::forImage(42, []) === ['contao.db.tl_files.42']);
+
+// --- v0.7.1: a file write invalidates the referencing rows' tags; the invalidate call changes no data ---
+$g = new FakeGateway(files($hex, $meta), [], [], 'en', $two); $tags = new FakeTags(); $log = new FakeLog();
+$r = writer($g, $tags, $log)->write(['uuid' => $hex, 'language' => 'en', 'target' => 'file', 'alt' => 'New alt', 'expected_alt' => 'Old alt']);
+$all = CacheTags::forImage(42, $two);
+check('file write: every referencing row\'s tag and parent tag is invalidated in one call and returned in full', $tags->invalidated === [$all] && $r['cache_tags'] === $all && true === $r['cache_cleared'], $r['cache_tags']);
+$g = new FakeGateway(files($hex, $meta), [], [], 'en', $two); $tags = new FakeTags(); $log = new FakeLog();
+$r = writer($g, $tags, $log)->write(['uuid' => $hex, 'language' => 'en', 'target' => 'file', 'alt' => 'Old alt', 'expected_alt' => 'Old alt']);
+check('file write that changes nothing: no tag invalidated', [] === $tags->invalidated && [] === $r['cache_tags']);
+$g = new FakeGateway(files($hex, $meta), [], [], 'en', $two); $tags = new FakeTags(); $log = new FakeLog();
+$r = writer($g, $tags, $log)->invalidate(['uuid' => strtoupper($hex)]);
+check('invalidate: the same tags are cleared, nothing is saved, the answer lists them all', $tags->invalidated === [$all] && $r['cache_tags'] === $all && true === $r['cache_cleared'] && false === $r['changed'] && [] === $g->savedMeta && [] === $g->savedRows, $r);
+check('invalidate: logged, naming Atlas and saying no data changed', 1 === count($log->lines) && str_contains($log->lines[0][0], 'Atlas') && str_contains($log->lines[0][0], 'no data changed'));
+$r = writer(new FakeGateway(files($hex, $meta), [], [], 'en', $two))->invalidate(['uuid' => $hex]);
+check('invalidate with no tag manager: the tags are still listed, cache_cleared false', false === $r['cache_cleared'] && $r['cache_tags'] === $all);
+check('invalidate: unknown file is 404, a bad uuid is 400', 404 === refused(fn () => writer(new FakeGateway())->invalidate(['uuid' => $hex]))?->status && 400 === refused(fn () => writer(new FakeGateway())->invalidate(['uuid' => 'zz']))?->status);
 
 echo $fails ? "\n$fails FAILED\n" : "\nALL PASSED\n";
 exit($fails ? 1 : 0);

@@ -12,6 +12,7 @@ use Doctrine\DBAL\Connection;
  * v0.7. The real ImageMetaGateway. The file's meta is saved through FilesModel (Contao's own model, so tstamp-style bookkeeping and the model
  * registry stay right) and never by raw SQL. A placement row has no model that fits every table a site adds its own image columns to
  * (Doublespark: dsImg_*, tl_ds_portfolio), so it is updated through DBAL with the three columns the writer passes and no others. Reads are SELECTs.
+ * v0.7.1: the cache tags come from ImageInventory's placement scan (the same rows the inventory reports) through CacheTags.
  * Not run against a live Contao here: the Atlas dry run and verification on the site are the proof.
  */
 class ContaoImageMetaGateway implements ImageMetaGateway
@@ -19,7 +20,7 @@ class ContaoImageMetaGateway implements ImageMetaGateway
     /** @var array<string, array<string, string>>|null */
     private ?array $schema = null;
 
-    public function __construct(private readonly Connection $db, private readonly ContaoFramework $framework)
+    public function __construct(private readonly Connection $db, private readonly ContaoFramework $framework, private readonly ImageInventory $inventory)
     {
     }
 
@@ -86,36 +87,14 @@ class ContaoImageMetaGateway implements ImageMetaGateway
 
     public function parentTags(string $table, array $row): array
     {
-        $tags = [];
-        if ('tl_content' !== $table) {
-            if (isset($row['pid']) && 'tl_page' === $table) {
-                $tags[] = 'contao.db.tl_page.'.(int) $row['pid'];
-            }
+        $this->assertKnown($table);
 
-            return $tags;
-        }
-        $ptable = (string) ($row['ptable'] ?? '') ?: 'tl_article';
-        $pid = (int) ($row['pid'] ?? 0);
-        for ($depth = 0; 'tl_content' === $ptable && $pid > 0 && $depth < 10; ++$depth) {
-            $tags[] = 'contao.db.tl_content.'.$pid;
-            $up = $this->db->fetchAssociative('SELECT pid, ptable FROM tl_content WHERE id = ?', [$pid]);
-            if (false === $up) {
-                break;
-            }
-            $ptable = (string) $up['ptable'] ?: 'tl_article';
-            $pid = (int) $up['pid'];
-        }
-        if ($pid > 0) {
-            $tags[] = "contao.db.$ptable.$pid";
-            if ('tl_article' === $ptable) {
-                $page = $this->db->fetchOne('SELECT pid FROM tl_article WHERE id = ?', [$pid]);
-                if (false !== $page) {
-                    $tags[] = 'contao.db.tl_page.'.(int) $page;
-                }
-            }
-        }
+        return CacheTags::forPlacement($this->inventory->placementOfRow($table, $row));
+    }
 
-        return $tags;
+    public function referenceTags(string $uuidHex, int $fileId): array
+    {
+        return CacheTags::forImage($fileId, $this->inventory->placementsOfUuid($uuidHex));
     }
 
     /** Only a table the schema scan found is ever put into SQL. */

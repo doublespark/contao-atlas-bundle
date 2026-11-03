@@ -59,6 +59,7 @@ services:
         arguments:
             - '@database_connection'
             - '@contao.framework'
+            - '@Doublespark\ContaoAtlasBundle\Service\ImageInventory'
 
     Doublespark\ContaoAtlasBundle\Service\ImageMetaWriter:
         arguments:
