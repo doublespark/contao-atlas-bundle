@@ -89,6 +89,27 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.9 (4 November 2026) - the entry image goes in the site's own folder
+
+- `image` gains an optional `folder`: a folder inside the upload path that the site already uses for its blog images, sent already resolved by Atlas
+  (Doublespark: `files/blog-news/2026/news/banner`, from the client's "Blog image folder" setting `files/blog-news/{year}/news/banner`, the year being the post's
+  publish year in Europe/London). The bundle never fills in a pattern itself.
+- **The folder is checked before anything is written.** It must start with the upload path (`files/`) and name a folder below it, use forward slashes only,
+  and every part must be letters, digits, hyphens, underscores or dots, never `.` or `..` on its own. An absolute path (`/...`, `C:/...`), a backslash, `..`,
+  an empty part (`files//x`), a space, the upload path itself or anything outside it is a **400** naming `image.folder`, and nothing is saved.
+- Missing folders are created and the file (with its parent folders) is registered through `Dbafs::addResource`, as in v0.6.
+- **Name.** With a folder the file is named after `filename` alone, as a slug (`brightonseo-2026-ppc-strategies.jpg`), with no `atlas-piece-N-` in front.
+- **Collisions.** If a file of that name is already in the folder and it is not the entry's own image (its `tl_files` uuid is not the entry's
+  `singleSRC`), it is never overwritten: `<slug>-2.<ext>` is written instead, then `-3` and so on. A file on disk that `tl_files` does not know counts as
+  someone else's too. Re-sending the same entry overwrites its own file, as before. The uuid of an existing file is read with `FilesModel::findByPath`
+  (**inference, not checked:** from memory of Contao 4.13 and 5.x, Contao's source is not on the build machine; the stand-in in the test answers from a map).
+- **No folder sent: exactly v0.6** (`files/atlas-news/<atlas_ref>-<slug>.<ext>`), so an older Atlas keeps working. A file the entry used before (for example
+  under `files/atlas-news/`) is left where it is; the API never moves or deletes a file.
+- `php tests/api_sqlite.php` gains the folder checks: folder accepted (slug name, created and registered), path traversal and the other bad forms refused with
+  400 on create and update, a collision with a registered and an unregistered foreign file, another entry sending the same name, a re-send overwriting its
+  own file, and no folder falling back. The SQLite test libraries are not on the build machine, so it was linted only (`php -l`); `NewsImageStore` itself was
+  driven directly with a stand-in for Dbafs and `tl_files` (folder rules, own re-send, foreign collision, fallback), and passed.
+
 ### v0.8 (3 November 2026) - an address resolves to a page the way Contao routes it
 
 - `GET /atlas-api/pages?url=` used to match the path's alias against every page on the site, so a site with two roots that each have a home page (alias `index`)

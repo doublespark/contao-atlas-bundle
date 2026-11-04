@@ -19,6 +19,8 @@ use Symfony\Component\HttpFoundation\Response;
  * v0.6: `subheadline` (core tl_news.subheadline, the heading many news list templates show) and `image` ({filename, data_base64, alt}: JPEG, PNG or
  * WebP up to 5 MB, stored under files/atlas-news/ and set as the entry's main image with that alt text). Both are reported in fields_applied /
  * fields_unsupported; a stored image also answers image_path. Bytes that are not such an image are a 422 and nothing is saved.
+ * v0.9: `image.folder` (optional), a folder inside the upload path the site already uses; a folder outside it, with `..`, absolute, with a backslash or
+ * with any other character is a 400 and nothing is saved. Without it the image goes under files/atlas-news/ as in v0.6 (NewsImageStore).
  */
 class NewsController
 {
@@ -232,7 +234,8 @@ class NewsController
     }
 
     /**
-     * v0.6. The shape of `image`: an object with filename (a string, 200 at most), data_base64 (a string) and alt (text, 1 to 255). Whether the bytes
+     * v0.6. The shape of `image`: an object with filename (a string, 200 at most), data_base64 (a string), alt (text, 1 to 255) and, v0.9, an optional
+     * folder (the writer's rule, NewsImageStore::folderProblem). Whether the bytes
      * are a usable image is the writer's question (a 422), asked after this.
      */
     private function imageProblem(mixed $image): ?string
@@ -248,6 +251,9 @@ class NewsController
         }
         if (!isset($image['alt']) || !\is_string($image['alt']) || '' === trim($image['alt']) || mb_strlen($image['alt']) > 255) {
             return 'image.alt must be text of 1 to 255 characters: an image is never stored without alt text.';
+        }
+        if (array_key_exists('folder', $image)) {
+            return $this->writer->imageFolderProblem($image['folder']);
         }
 
         return null;
