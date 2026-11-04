@@ -150,7 +150,7 @@ $logo = $byPath['files/logo.svg'];
 $nested = array_values(array_filter($logo['placements'], static fn ($x) => 43 === $x['row_id']))[0] ?? [];
 check('element inside an element group is followed up to its news entry', 'tl_content' === ($nested['table'] ?? '') && 'dsImg_defaultSrc' === $nested['column'] && 30 === $nested['parent']['news_id'], $nested);
 check('custom portfolio column found by the schema scan', ['tl_ds_portfolio.main_image#50'] === $where($byPath['files/team/banner.jpg']) && null === $byPath['files/team/banner.jpg']['placements'][0]['parent']['page_id'], $byPath['files/team/banner.jpg']);
-check('v0.7: the list advertises the meta write so Atlas can refuse a site without it', '0.8' === ($a['bundle_version'] ?? null) && in_array('images_meta_write', $a['capabilities'] ?? [], true) && in_array('images_invalidate', $a['capabilities'] ?? [], true), [$a['bundle_version'] ?? null, $a['capabilities'] ?? null]);
+check('v0.7: the list advertises the meta write so Atlas can refuse a site without it', '0.8.1' === ($a['bundle_version'] ?? null) && in_array('images_meta_write', $a['capabilities'] ?? [], true) && in_array('images_invalidate', $a['capabilities'] ?? [], true) && in_array('images_file_read', $a['capabilities'] ?? [], true), [$a['bundle_version'] ?? null, $a['capabilities'] ?? null]);
 check('uuid_columns lists the custom columns, not tl_files, tl_user, orderSRC or another schema', in_array('tl_ds_portfolio.main_image', $a['uuid_columns'], true)
     && in_array('tl_content.dsImg_defaultSrc', $a['uuid_columns'], true) && !array_filter($a['uuid_columns'], static fn ($x) => str_starts_with($x, 'tl_files.') || str_starts_with($x, 'tl_user.') || str_ends_with($x, 'orderSRC') || str_ends_with($x, 'otherSRC')), $a['uuid_columns']);
 
@@ -250,6 +250,40 @@ check('live samples: map, todd-research, hotjar and the hyphenated logo name res
     && 'filename' === $r[4]['method'] && 'files/images/system/logo/doublespark-google-partner-h-100.webp' === $r[4]['path'], $r);
 check('live samples: cntech has a .webp and a .png source, so it is ambiguous with both candidates listed',
     'ambiguous' === $r[1]['method'] && 2 === count($r[1]['candidates']), $r[1]);
+
+// --- v0.8.1: GET /atlas-api/images/file streams the original bytes by uuid, from disk, whatever the folder's public setting ---
+// files/atlas-news/ stands for the folder the news publisher creates: on disk and in tl_files, but a non-public Contao folder, so its public address 404s.
+// The endpoint reads the disk and never asks for that address, so the file comes back.
+@mkdir("$root/files/atlas-news", 0777, true);
+file_put_contents("$root/files/atlas-news/atlas-piece-1-x.jpg", "\xFF\xD8\xFF\xE0jpegbytes");
+$file(30, 30, 'files/atlas-news/atlas-piece-1-x.jpg', 'jpg');
+$file(31, 31, 'files/atlas-news/gone.jpg', 'jpg');                        // in tl_files, not on disk
+file_put_contents("$root-outside.jpg", 'secret');                         // a real file beside the project folder, reached by a path that climbs out of it
+$file(32, 32, 'files/../../'.basename($root).'-outside.jpg', 'jpg');
+$c = new ImagesController(new ImageInventory($db, new ContentUrls(new Contao\CoreBundle\Framework\ContaoFramework(), null), $root), hash('sha256', 'tok'));
+$fileGet = static function (ImagesController $c, array $query, string $token = 'tok'): \Symfony\Component\HttpFoundation\Response {
+    return $c->file(Request::create('/x', 'GET', $query, [], [], ['HTTP_AUTHORIZATION' => "Bearer $token"]));
+};
+$resp = $fileGet($c, ['uuid' => $hex(30)]);
+check('file: 200 with the original bytes and the extension\'s content type', 200 === $resp->getStatusCode() && 'image/jpeg' === $resp->headers->get('Content-Type')
+    && "\xFF\xD8\xFF\xE0jpegbytes" === file_get_contents($resp->getFile()->getPathname()), [$resp->getStatusCode(), $resp->headers->get('Content-Type')]);
+check('file: private cache headers, nosniff, an ETag', str_contains((string) $resp->headers->get('Cache-Control'), 'private') && str_contains((string) $resp->headers->get('Cache-Control'), 'max-age=3600')
+    && 'nosniff' === $resp->headers->get('X-Content-Type-Options') && '' !== (string) $resp->headers->get('ETag'), $resp->headers->all());
+$again = $c->file(Request::create('/x', 'GET', ['uuid' => $hex(30)], [], [], ['HTTP_AUTHORIZATION' => 'Bearer tok', 'HTTP_IF_NONE_MATCH' => $resp->headers->get('ETag')]));
+check('file: a matching If-None-Match gets 304', 304 === $again->getStatusCode(), $again->getStatusCode());
+check('file: the svg is served as image/svg+xml with a sandbox policy', 'image/svg+xml' === $fileGet($c, ['uuid' => $hex(2)])->headers->get('Content-Type')
+    && str_contains((string) $fileGet($c, ['uuid' => $hex(2)])->headers->get('Content-Security-Policy'), 'sandbox'));
+$resp = $fileGet($c, ['uuid' => $hex(31)]);
+$body = json_decode((string) $resp->getContent(), true);
+check('file: in the file database but not on disk is 404 reason file_not_on_disk (this is "missing")', 404 === $resp->getStatusCode() && 'file_not_on_disk' === ($body['reason'] ?? null), $body);
+$resp = $fileGet($c, ['uuid' => $hex(99)]);
+check('file: no such uuid is 404 reason unknown_uuid', 404 === $resp->getStatusCode() && 'unknown_uuid' === (json_decode((string) $resp->getContent(), true)['reason'] ?? null));
+$resp = $fileGet($c, ['uuid' => $hex(4)]);
+check('file: a pdf row is not an image, so unknown_uuid and never streamed', 404 === $resp->getStatusCode() && 'unknown_uuid' === (json_decode((string) $resp->getContent(), true)['reason'] ?? null));
+$resp = $fileGet($c, ['uuid' => $hex(32)]);
+check('file: a path that resolves outside the project folder is refused as file_not_on_disk, though the file exists', is_file("$root-outside.jpg") && 404 === $resp->getStatusCode() && 'file_not_on_disk' === (json_decode((string) $resp->getContent(), true)['reason'] ?? null));
+check('file: a bad uuid is 400', 400 === $fileGet($c, ['uuid' => 'files/hero.png'])->getStatusCode() && 400 === $fileGet($c, [])->getStatusCode());
+check('file: without the token or with a wrong one is 401', 401 === $fileGet($c, ['uuid' => $hex(30)], 'wrong')->getStatusCode());
 
 echo $fails ? "FAILED: $fails\n" : "ALL PASSED\n";
 }

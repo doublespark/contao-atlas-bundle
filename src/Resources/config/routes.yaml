@@ -72,3 +72,11 @@ atlas_api_images_resolve:
     methods: [GET]
     defaults:
         _token_check: false
+
+# v0.8.1: the original file's bytes by uuid, read from disk whatever the folder's public setting (capability images_file_read). GET only, bearer token.
+atlas_api_images_file:
+    path: /atlas-api/images/file
+    controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::file
+    methods: [GET]
+    defaults:
+        _token_check: false

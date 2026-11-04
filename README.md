@@ -89,6 +89,26 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.8.1 (4 November 2026) - read an image's original bytes by uuid
+
+(The Atlas brief called this v0.7.2. The bundle was already at v0.8 when it was written, so the number follows v0.8.)
+
+- `GET /atlas-api/images/file?uuid=<32 hex>`, the same bearer token as every other call. Streams the original file with its content type (set from the
+  extension: jpg, jpeg, png, webp, gif, svg, avif; never guessed from the bytes), `Cache-Control: private, max-age=3600`, an ETag and `If-None-Match` support,
+  `X-Content-Type-Options: nosniff`, and a sandbox policy so an SVG opened on its own runs no script.
+- It reads the file from disk. It never asks for the file's public address, so it works whatever the folder's public setting: the folder the news publisher
+  creates (`files/atlas-news`) is a plain `mkdir` with no `.public` marker, and on Contao 5 the public address of a file in such a folder is not served
+  directly, while the file itself is on disk and in the file database.
+- Answers: 200 the bytes. 400 `uuid` is not 32 hex characters. 401 without the token. 404 with `{error, reason, uuid, path}`: `reason` `unknown_uuid` (no image
+  file with that uuid in `tl_files`; a row that is not an image extension counts as this, so the endpoint never streams a pdf) or `file_not_on_disk` (in
+  `tl_files`, not on disk, unreadable, or a path that resolves outside the project folder). Atlas treats exactly those two reasons as "file missing".
+- `GET /atlas-api/images` now answers `bundle_version` `0.8.1` and adds `images_file_read` to `capabilities`. Atlas uses the endpoint only for a site that
+  advertises it, and falls back to the public address for a site that does not.
+- `php tests/images_sqlite.php` covers it (bytes and type, cache headers, 304, svg, not on disk, unknown uuid, a pdf row, a path out of the project folder, a
+  bad uuid, no token). **Not run here:** that test needs the libraries named at its top, which are not on the build machine. `locateFile` (the decision part) was
+  run against a stub connection and answered ok / file_not_on_disk / file_not_on_disk (outside the project) / unknown_uuid (a pdf) / unknown_uuid correctly; the
+  controller's headers and the 304 are `php -l` only. The proof on a site is `GET /atlas-api/images/file` for the Doublespark news image.
+
 ### v0.8 (3 November 2026) - an address resolves to a page the way Contao routes it
 
 - `GET /atlas-api/pages?url=` used to match the path's alias against every page on the site, so a site with two roots that each have a home page (alias `index`)

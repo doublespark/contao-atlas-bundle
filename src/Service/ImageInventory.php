@@ -32,8 +32,12 @@ class ImageInventory
     public const MAX_PER_PAGE = 500;
 
     /** v0.7: what this bundle can do beyond the reads, so Atlas can refuse to push to a site that cannot take it (POST /atlas-api/images/meta). */
-    public const BUNDLE_VERSION = '0.8';
-    public const CAPABILITIES = ['images_meta_write', 'images_invalidate'];
+    public const BUNDLE_VERSION = '0.8.1';
+    public const CAPABILITIES = ['images_meta_write', 'images_invalidate', 'images_file_read'];
+
+    /** v0.8.1: the content type each image extension is streamed with (GET /atlas-api/images/file). Set from the extension, never guessed from the bytes. */
+    public const CONTENT_TYPES = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif',
+        'svg' => 'image/svg+xml', 'avif' => 'image/avif'];
 
     /** @var array<string, array<string, string>>|null table => column => column type (lower case) */
     private ?array $schema = null;
@@ -147,6 +151,32 @@ class ImageInventory
         }
 
         return $answer;
+    }
+
+    /**
+     * v0.8.1. Where one image file's bytes are, for GET /atlas-api/images/file. The uuid must be a tl_files row of type 'file' with an image
+     * extension; the path it names must resolve (symlinks followed) to a readable file inside the project folder. Read only: touches nothing.
+     *  - ok: absolute, path, extension, content_type are set.
+     *  - unknown_uuid: no such image file in tl_files.
+     *  - file_not_on_disk: tl_files has it and the disk does not (or it is outside the project folder, or unreadable). This, and only this, is "missing".
+     *
+     * @return array{status:string,path?:string,absolute?:string,extension?:string,content_type?:string}
+     */
+    public function locateFile(string $uuidHex): array
+    {
+        $row = $this->db->fetchAssociative("SELECT path, extension FROM tl_files WHERE uuid = UNHEX(?) AND type = 'file'", [strtolower($uuidHex)]);
+        $extension = false === $row ? '' : strtolower((string) $row['extension']);
+        if (false === $row || !isset(self::CONTENT_TYPES[$extension])) {
+            return ['status' => 'unknown_uuid'];
+        }
+        $path = (string) $row['path'];
+        $root = realpath($this->projectDir);
+        $absolute = realpath(rtrim($this->projectDir, '/').'/'.$path);
+        if (false === $root || false === $absolute || !str_starts_with($absolute, rtrim($root, '/').'/') || !is_file($absolute) || !is_readable($absolute)) {
+            return ['status' => 'file_not_on_disk', 'path' => $path];
+        }
+
+        return ['status' => 'ok', 'path' => $path, 'absolute' => $absolute, 'extension' => $extension, 'content_type' => self::CONTENT_TYPES[$extension]];
     }
 
     /**
