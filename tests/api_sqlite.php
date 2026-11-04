@@ -32,9 +32,12 @@ $fails = 0;
 function check(string $what, bool $ok, $detail = ''): void { global $fails; echo ($ok ? 'PASS ' : 'FAIL ').$what.($ok ? '' : '  '.json_encode($detail))."\n"; if (!$ok) { ++$fails; } }
 
 // v0.6: stands in for Contao's Dbafs (which needs the whole framework): records what was registered and answers a fixed 16-byte uuid.
+// v0.9: each path gets its own uuid (the first one registered is 16 x 01, as the v0.6 checks expect), and uuidOf answers from the same map, as tl_files would.
 class FakeImageStore extends Doublespark\ContaoAtlasBundle\Service\NewsImageStore {
     public array $registered = [];
-    protected function register(string $path): string { $this->registered[] = $path; return str_repeat("\x01", 16); }
+    public array $uuids = [];
+    protected function register(string $path): string { $this->registered[] = $path; return $this->uuids[$path] ??= str_repeat(chr(\count($this->uuids) + 1), 16); }
+    protected function uuidOf(string $path): ?string { return $this->uuids[$path] ?? null; }
 }
 $projectDir = sys_get_temp_dir().'/atlas-bundle-test-'.getmypid();
 @mkdir($projectDir, 0775, true);
@@ -181,6 +184,46 @@ check('image that is not an object: 400', 400 === $st, $a);
 [$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'X', 'atlas_ref' => 'r-nostore', 'body_html' => '<p>b</p>', 'image' => $image]);
 check('no image store: created, image reported unsupported, nothing set', 201 === $st && ['image'] === ($a['fields_unsupported'] ?? null)
     && '' === (string) $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [(int) $a['id']]), $a);
+
+// --- v0.9: image.folder ---
+$folder = 'files/blog-news/2026/news/banner';
+$post = ['filename' => 'brightonseo-2026-ppc-strategies.png', 'data_base64' => $png, 'alt' => 'A stage at BrightonSEO', 'folder' => $folder];
+[$db, $c] = site(true);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'F', 'atlas_ref' => 'atlas-piece-41', 'body_html' => '<p>b</p>', 'image' => $post]);
+$own = $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [(int) ($a['id'] ?? 0)]);
+check('folder accepted: the file is the slug alone in that folder, created and registered', 201 === $st && "$folder/brightonseo-2026-ppc-strategies.png" === ($a['image_path'] ?? null)
+    && is_file("$projectDir/$folder/brightonseo-2026-ppc-strategies.png") && "$folder/brightonseo-2026-ppc-strategies.png" === end($store->registered)
+    && $store->uuids["$folder/brightonseo-2026-ppc-strategies.png"] === $own, $a);
+$entry = (int) $a['id'];
+$before = count($store->registered);
+[$st, $a] = call($c, 'update', ['image' => $post], $entry);
+check('re-send of the same entry overwrites its own file, no -2 copy', 200 === $st && "$folder/brightonseo-2026-ppc-strategies.png" === ($a['image_path'] ?? null)
+    && !is_file("$projectDir/$folder/brightonseo-2026-ppc-strategies-2.png") && $own === $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [$entry])
+    && count($store->registered) === $before + 1, $a);
+// A file of the same name a person put there (another post's banner): known to tl_files under its own uuid, and one on disk that tl_files does not know.
+@mkdir("$projectDir/files/blog-news/2025/news/banner", 0775, true);
+file_put_contents("$projectDir/files/blog-news/2025/news/banner/their-post.png", 'theirs');
+$store->uuids['files/blog-news/2025/news/banner/their-post.png'] = str_repeat("\x7f", 16);
+file_put_contents("$projectDir/files/blog-news/2025/news/banner/their-post-2.png", 'unregistered');
+$foreign = ['filename' => 'their-post.png', 'data_base64' => $png, 'alt' => 'x', 'folder' => 'files/blog-news/2025/news/banner/'];
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'G', 'atlas_ref' => 'atlas-piece-42', 'body_html' => '<p>b</p>', 'image' => $foreign]);
+check('collision with a foreign file: neither the registered nor the unregistered file is touched, -3 is written', 201 === $st
+    && 'files/blog-news/2025/news/banner/their-post-3.png' === ($a['image_path'] ?? null) && 'theirs' === file_get_contents("$projectDir/files/blog-news/2025/news/banner/their-post.png")
+    && 'unregistered' === file_get_contents("$projectDir/files/blog-news/2025/news/banner/their-post-2.png"), $a);
+[$st, $a] = call($c, 'update', ['image' => $foreign], $entry);
+check('another entry sending the same name is a foreign file too: it gets the next free name', 200 === $st && 'files/blog-news/2025/news/banner/their-post-4.png' === ($a['image_path'] ?? null), $a);
+$count = (int) $db->fetchOne('SELECT COUNT(*) FROM tl_news');
+foreach (['files/../config', '../files/x', '/var/www/files/x', 'files\\blog', 'files', 'templates/x', 'files/blog news', 'files/./x', 'C:/files/x', 'files//x', 42, ''] as $bad) {
+    [$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'H', 'atlas_ref' => 'r-bad-'.md5(json_encode($bad)), 'body_html' => '<p>b</p>', 'image' => ['folder' => $bad] + $post]);
+    check('folder '.json_encode($bad).' refused with 400 naming image.folder', 400 === $st && str_contains((string) ($a['error'] ?? ''), 'image.folder'), $a);
+}
+check('a refused folder saves nothing', $count === (int) $db->fetchOne('SELECT COUNT(*) FROM tl_news') && !is_dir("$projectDir/config"));
+[$st, $a] = call($c, 'update', ['image' => ['folder' => 'files/../../etc'] + $post], $entry);
+check('path traversal on an update: 400, the entry keeps its image', 400 === $st && $own === $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [$entry]), $a);
+unset($post['folder']);
+[$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'I', 'atlas_ref' => 'atlas-piece-43', 'body_html' => '<p>b</p>', 'image' => $post]);
+check('no folder falls back to files/atlas-news with the atlas_ref prefix (v0.6)', 201 === $st
+    && 'files/atlas-news/atlas-piece-43-brightonseo-2026-ppc-strategies.png' === ($a['image_path'] ?? null) && is_file("$projectDir/files/atlas-news/atlas-piece-43-brightonseo-2026-ppc-strategies.png"), $a);
 
 echo $fails ? "FAILED: $fails\n" : "ALL PASSED\n";
 }

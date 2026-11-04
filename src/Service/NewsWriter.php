@@ -145,7 +145,7 @@ class NewsWriter
     public function update(int $id, array $in): array
     {
         $this->categories(); // probed before the transaction opens
-        $image = $this->storeImage((string) $this->refFor($id), $in);
+        $image = $this->storeImage((string) $this->refFor($id), $in, $id);
 
         $this->db->transactional(function () use ($id, $in, $image): void {
             $now = time();
@@ -451,6 +451,19 @@ class NewsWriter
         }
     }
 
+    /**
+     * v0.9. Why image.folder cannot be used, or null: the store's own rule (inside the upload path). A site with no image store reports the image as
+     * unsupported and never writes it, so there only the type is checked.
+     */
+    public function imageFolderProblem(mixed $folder): ?string
+    {
+        if (null === $this->images) {
+            return \is_string($folder) ? null : 'image.folder must be a folder path. Nothing was saved.';
+        }
+
+        return $this->images->folderProblem($folder);
+    }
+
     /** True when this site can store an entry image: an image store is configured and tl_news has the core image columns. */
     private function imageSupported(): bool
     {
@@ -470,15 +483,23 @@ class NewsWriter
      * Writes and registers the image when one was sent and the site can hold it, and answers the tl_news columns that show it as the entry's
      * main image with Atlas's alt text (overwriteMeta, so the alt is the entry's own and not the file's). Nothing sent: no columns, image unchanged.
      *
+     * v0.9: on an update the entry's current singleSRC is handed to the store, so a write into a named folder overwrites the entry's own file and
+     * never another one of the same name.
+     *
      * @return array<string,mixed>
      */
-    private function storeImage(string $atlasRef, array $in): array
+    private function storeImage(string $atlasRef, array $in, ?int $newsId = null): array
     {
         $this->imagePath = null;
         if (!isset($in['image']) || !$this->imageSupported()) {
             return [];
         }
-        $stored = $this->images->store($atlasRef, $in['image']);
+        $current = null;
+        if (null !== $newsId) {
+            $value = $this->db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [$newsId]);
+            $current = \is_string($value) && '' !== $value ? $value : null;
+        }
+        $stored = $this->images->store($atlasRef, $in['image'], $current);
         $this->imagePath = $stored['path'];
 
         return ['addImage' => true, 'singleSRC' => $stored['uuid'], 'overwriteMeta' => true, 'alt' => (string) $in['image']['alt']];
