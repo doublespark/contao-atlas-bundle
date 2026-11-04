@@ -218,8 +218,10 @@ foreach (['files/../config', '../files/x', '/var/www/files/x', 'files\\blog', 'f
     check('folder '.json_encode($bad).' refused with 400 naming image.folder', 400 === $st && str_contains((string) ($a['error'] ?? ''), 'image.folder'), $a);
 }
 check('a refused folder saves nothing', $count === (int) $db->fetchOne('SELECT COUNT(*) FROM tl_news') && !is_dir("$projectDir/config"));
+// The entry's image changed to their-post-4 above, so compare with what it holds now, not with $own.
+$current = $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [$entry]);
 [$st, $a] = call($c, 'update', ['image' => ['folder' => 'files/../../etc'] + $post], $entry);
-check('path traversal on an update: 400, the entry keeps its image', 400 === $st && $own === $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [$entry]), $a);
+check('path traversal on an update: 400, the entry keeps its image', 400 === $st && $current === $db->fetchOne('SELECT singleSRC FROM tl_news WHERE id = ?', [$entry]), $a);
 unset($post['folder']);
 [$st, $a] = call($c, 'create', ['archive_id' => 2, 'headline' => 'I', 'atlas_ref' => 'atlas-piece-43', 'body_html' => '<p>b</p>', 'image' => $post]);
 check('no folder falls back to files/atlas-news with the atlas_ref prefix (v0.6)', 201 === $st
