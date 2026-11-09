@@ -89,6 +89,13 @@ on a server always installs exactly what was committed. To ship a change: commit
 - Same bearer token as the news calls. The two columns have the same names on Contao 4.13 and 5.x (checked in the sources of 4.13.56 and 5.7, 2 November 2026).
   Not run against a live site (no PHP project here); the Atlas smoke test on each site is the proof.
 
+### v0.9.1 (9 November 2026) - resolve addresses in batches
+
+- `POST /atlas-api/images/resolve-batch` with a JSON body `{"urls": [...]}` (1 to 200 addresses) gives the same answers, in the same order, as
+  `GET /atlas-api/images/resolve`, through the same lookup. Read-only. The list answer advertises it as capability `images_resolve_batch` and reports
+  `bundle_version` 0.9.1. Why: Atlas asked the GET call 20 addresses at a time, and a site with thousands of stored variant addresses was rate limited by
+  Cloudflare (HTTP 429, error 1015). The GET call is unchanged for an older caller. Not run against a live site; `php -l` only (the test libraries are not in this checkout).
+
 ### v0.9 (4 November 2026) - the entry image goes in the site's own folder
 
 - `image` gains an optional `folder`: a folder inside the upload path that the site already uses for its blog images, sent already resolved by Atlas

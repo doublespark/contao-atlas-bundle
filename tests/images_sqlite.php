@@ -150,7 +150,7 @@ $logo = $byPath['files/logo.svg'];
 $nested = array_values(array_filter($logo['placements'], static fn ($x) => 43 === $x['row_id']))[0] ?? [];
 check('element inside an element group is followed up to its news entry', 'tl_content' === ($nested['table'] ?? '') && 'dsImg_defaultSrc' === $nested['column'] && 30 === $nested['parent']['news_id'], $nested);
 check('custom portfolio column found by the schema scan', ['tl_ds_portfolio.main_image#50'] === $where($byPath['files/team/banner.jpg']) && null === $byPath['files/team/banner.jpg']['placements'][0]['parent']['page_id'], $byPath['files/team/banner.jpg']);
-check('v0.7: the list advertises the meta write so Atlas can refuse a site without it', '0.8.1' === ($a['bundle_version'] ?? null) && in_array('images_meta_write', $a['capabilities'] ?? [], true) && in_array('images_invalidate', $a['capabilities'] ?? [], true) && in_array('images_file_read', $a['capabilities'] ?? [], true), [$a['bundle_version'] ?? null, $a['capabilities'] ?? null]);
+check('v0.7: the list advertises the meta write so Atlas can refuse a site without it', '0.9.1' === ($a['bundle_version'] ?? null) && in_array('images_meta_write', $a['capabilities'] ?? [], true) && in_array('images_invalidate', $a['capabilities'] ?? [], true) && in_array('images_file_read', $a['capabilities'] ?? [], true) && in_array('images_resolve_batch', $a['capabilities'] ?? [], true), [$a['bundle_version'] ?? null, $a['capabilities'] ?? null]);
 check('uuid_columns lists the custom columns, not tl_files, tl_user, orderSRC or another schema', in_array('tl_ds_portfolio.main_image', $a['uuid_columns'], true)
     && in_array('tl_content.dsImg_defaultSrc', $a['uuid_columns'], true) && !array_filter($a['uuid_columns'], static fn ($x) => str_starts_with($x, 'tl_files.') || str_starts_with($x, 'tl_user.') || str_ends_with($x, 'orderSRC') || str_ends_with($x, 'otherSRC')), $a['uuid_columns']);
 
@@ -182,6 +182,30 @@ check('a single url= also accepted', 200 === $st);
 check('more than 20 addresses: 400', 400 === $st);
 [$st] = get($c, 'resolve', []);
 check('no address: 400', 400 === $st);
+// --- v0.9.1: POST /atlas-api/images/resolve-batch, the same resolution for up to 200 addresses ---
+function post(ImagesController $c, string $action, $body, string $token = 'tok'): array {
+    $r = Request::create('/x', 'POST', [], [], [], ['HTTP_AUTHORIZATION' => "Bearer $token", 'CONTENT_TYPE' => 'application/json'], is_string($body) ? $body : json_encode($body));
+    $resp = $c->$action($r);
+
+    return [$resp->getStatusCode(), json_decode((string) $resp->getContent(), true)];
+}
+$batchUrls = ['https://www.example.com/files/hero.png', '/assets/images/1/photo-1a2b3c4d5.jpg', '/assets/images/9/missing-9a8b7c6d5.jpg'];
+[$st, $b] = post($c, 'resolveBatch', ['urls' => $batchUrls]);
+[, $single] = get($c, 'resolve', ['url' => $batchUrls]);
+check('resolve-batch: 200 and the same answers, in order, as the GET call', 200 === $st && ($single['results'] ?? null) === ($b['results'] ?? false) && 3 === count($b['results']), $b);
+[$st] = post($c, 'resolveBatch', ['urls' => array_fill(0, 200, '/files/hero.png')]);
+check('resolve-batch: 200 addresses accepted', 200 === $st);
+[$st] = post($c, 'resolveBatch', ['urls' => array_fill(0, 201, '/files/hero.png')]);
+check('resolve-batch: 201 addresses refused with 400', 400 === $st);
+[$st] = post($c, 'resolveBatch', ['urls' => []]);
+check('resolve-batch: no address: 400', 400 === $st);
+[$st] = post($c, 'resolveBatch', 'not json');
+check('resolve-batch: a body that is not JSON: 400', 400 === $st);
+[$st] = post($c, 'resolveBatch', ['urls' => ['/files/hero.png', '']]);
+check('resolve-batch: an empty address: 400', 400 === $st);
+[$st] = post($c, 'resolveBatch', ['urls' => $batchUrls], 'wrong');
+check('resolve-batch without the token: 401', 401 === $st);
+
 [$st] = get($c, 'resolve', ['url' => '/files/hero.png'], 'wrong');
 check('resolve without the token: 401', 401 === $st);
 

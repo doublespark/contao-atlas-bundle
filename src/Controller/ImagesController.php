@@ -23,6 +23,9 @@ use Symfony\Component\HttpFoundation\Response;
  * v0.8.1 adds GET /atlas-api/images/file?uuid=... (capability `images_file_read`): the original file's bytes with its content type, bearer token like the
  * rest. Atlas reads image bytes from here, not from the public address, because Contao 5 does not serve files directly from a non-public folder (the
  * folder the news publisher creates) while the file is perfectly fine on disk.
+ *
+ * v0.9.1 adds POST /atlas-api/images/resolve-batch (capability `images_resolve_batch`): the same resolution as the GET call, for up to 200 addresses sent as
+ * a JSON body {"urls": [...]}, so a site with thousands of stored variant addresses is not asked a question per 20 (Cloudflare rate limited that).
  */
 class ImagesController
 {
@@ -30,6 +33,9 @@ class ImagesController
 
     /** Addresses per resolve call. GET keeps it read-only; 20 keeps the request line well under nginx's default 8 KB header buffer. */
     public const MAX_RESOLVE = 20;
+
+    /** Addresses per resolve-batch call (v0.9.1). A POST body has no request-line limit, so the batch is far larger than the GET call's. */
+    public const MAX_RESOLVE_BATCH = 200;
 
     public function __construct(private readonly ImageInventory $inventory, private readonly string $tokenHash, private readonly ?ImageMetaWriter $writer = null)
     {
@@ -153,18 +159,53 @@ class ImagesController
             if (!\is_array($urls) || [] === $urls || \count($urls) > self::MAX_RESOLVE) {
                 return $this->error('Send 1 to '.self::MAX_RESOLVE.' addresses as url[]=...', 400);
             }
-            $results = [];
-            foreach ($urls as $url) {
-                if (!\is_string($url) || '' === trim($url)) {
-                    return $this->error('Every url must be a non-empty string.', 400);
-                }
-                $results[] = $this->inventory->resolve(trim($url));
+            $results = $this->resolveAll($urls);
+            if (null === $results) {
+                return $this->error('Every url must be a non-empty string.', 400);
             }
 
             return new JsonResponse(['results' => $results], 200);
         } catch (\Throwable $e) {
             return $this->failure($e);
         }
+    }
+
+    /** v0.9.1. POST /atlas-api/images/resolve-batch with {"urls": [...]} (1 to MAX_RESOLVE_BATCH): the same answers, in the same order, as resolve(). Read-only. */
+    public function resolveBatch(Request $request): Response
+    {
+        if (null !== $denied = $this->authenticate($request)) {
+            return $denied;
+        }
+
+        try {
+            $body = json_decode((string) $request->getContent(), true);
+            $urls = \is_array($body) ? ($body['urls'] ?? null) : null;
+            if (!\is_array($urls) || !array_is_list($urls) || [] === $urls || \count($urls) > self::MAX_RESOLVE_BATCH) {
+                return $this->error('Send a JSON object {"urls": [...]} with 1 to '.self::MAX_RESOLVE_BATCH.' addresses.', 400);
+            }
+            $results = $this->resolveAll($urls);
+            if (null === $results) {
+                return $this->error('Every url must be a non-empty string.', 400);
+            }
+
+            return new JsonResponse(['results' => $results], 200);
+        } catch (\Throwable $e) {
+            return $this->failure($e);
+        }
+    }
+
+    /** One answer per address, in order (the one resolution both routes use); null when any address is not a non-empty string. */
+    private function resolveAll(array $urls): ?array
+    {
+        $results = [];
+        foreach ($urls as $url) {
+            if (!\is_string($url) || '' === trim($url)) {
+                return null;
+            }
+            $results[] = $this->inventory->resolve(trim($url));
+        }
+
+        return $results;
     }
 
     /** 500 body for a request that carried the valid token: the exception class and message, never a trace. */

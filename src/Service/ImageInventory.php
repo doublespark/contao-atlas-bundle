@@ -32,8 +32,8 @@ class ImageInventory
     public const MAX_PER_PAGE = 500;
 
     /** v0.7: what this bundle can do beyond the reads, so Atlas can refuse to push to a site that cannot take it (POST /atlas-api/images/meta). */
-    public const BUNDLE_VERSION = '0.8.1';
-    public const CAPABILITIES = ['images_meta_write', 'images_invalidate', 'images_file_read'];
+    public const BUNDLE_VERSION = '0.9.1';
+    public const CAPABILITIES = ['images_meta_write', 'images_invalidate', 'images_file_read', 'images_resolve_batch'];
 
     /** v0.8.1: the content type each image extension is streamed with (GET /atlas-api/images/file). Set from the extension, never guessed from the bytes. */
     public const CONTENT_TYPES = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif',

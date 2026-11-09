@@ -73,6 +73,14 @@ atlas_api_images_resolve:
     defaults:
         _token_check: false
 
+# v0.9.1: the same resolution for up to 200 addresses in a JSON body (capability images_resolve_batch). Read-only despite the POST.
+atlas_api_images_resolve_batch:
+    path: /atlas-api/images/resolve-batch
+    controller: Doublespark\ContaoAtlasBundle\Controller\ImagesController::resolveBatch
+    methods: [POST]
+    defaults:
+        _token_check: false
+
 # v0.8.1: the original file's bytes by uuid, read from disk whatever the folder's public setting (capability images_file_read). GET only, bearer token.
 atlas_api_images_file:
     path: /atlas-api/images/file
